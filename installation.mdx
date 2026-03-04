@@ -1,0 +1,338 @@
+---
+title: Installation
+description: Install QMD and download the required GGUF models for local search
+---
+
+# Installation
+
+QMD requires Node.js 22+ or Bun 1.0+ and uses three local GGUF models for embeddings, re-ranking, and query expansion. Models are automatically downloaded on first use.
+
+## System Requirements
+
+### Runtime
+
+<CodeGroup>
+```bash Node.js
+# Node.js >= 22.0.0 required
+node --version
+```
+
+```bash Bun
+# Bun >= 1.0.0 required
+bun --version
+```
+</CodeGroup>
+
+<Warning>
+  Node.js version 22 or higher is **required**. QMD uses modern JavaScript features that are not available in older versions.
+</Warning>
+
+### Platform-Specific Requirements
+
+<Tabs>
+  <Tab title="macOS">
+    Install Homebrew SQLite for extension support:
+    
+    ```bash
+    brew install sqlite
+    ```
+    
+    This is required for the `sqlite-vec` extension used by vector search.
+  </Tab>
+  
+  <Tab title="Linux">
+    No additional dependencies required. The `sqlite-vec` native bindings are included.
+  </Tab>
+  
+  <Tab title="Windows">
+    No additional dependencies required. The `sqlite-vec` native bindings are included.
+  </Tab>
+</Tabs>
+
+### Storage Requirements
+
+Plan for approximately **2.5GB** of storage:
+
+| Component | Size | Purpose |
+|-----------|------|----------|
+| Models | ~2.1GB total | GGUF model files (see below) |
+| Index | Variable | SQLite database (~10MB per 1000 docs) |
+| Cache | Variable | Model cache and LLM response cache |
+
+## Install QMD
+
+<Tabs>
+  <Tab title="npm">
+    ### Global Installation (Recommended)
+    
+    ```bash
+    npm install -g @tobilu/qmd
+    ```
+    
+    This makes the `qmd` command available system-wide.
+    
+    ### Run Without Installing
+    
+    ```bash
+    npx @tobilu/qmd <command>
+    ```
+    
+    Use `npx` to run QMD without a global install. Useful for trying it out or running specific versions.
+  </Tab>
+  
+  <Tab title="Bun">
+    ### Global Installation (Recommended)
+    
+    ```bash
+    bun install -g @tobilu/qmd
+    ```
+    
+    This makes the `qmd` command available system-wide.
+    
+    ### Run Without Installing
+    
+    ```bash
+    bunx @tobilu/qmd <command>
+    ```
+    
+    Use `bunx` to run QMD without a global install. Useful for trying it out or running specific versions.
+  </Tab>
+  
+  <Tab title="Development">
+    ### Install from Source
+    
+    ```bash
+    git clone https://github.com/tobi/qmd
+    cd qmd
+    npm install
+    npm link
+    ```
+    
+    This creates a symlink to the development version. Use `npm unlink` to remove it.
+    
+    ### Run from Source
+    
+    ```bash
+    bun src/qmd.ts <command>
+    ```
+  </Tab>
+</Tabs>
+
+## GGUF Models
+
+QMD uses three local GGUF models that are automatically downloaded from HuggingFace on first use:
+
+<AccordionGroup>
+  <Accordion title="embeddinggemma-300M-Q8_0 (~300MB)" icon="vector-square">
+    **Purpose:** Generate vector embeddings for documents and queries
+    
+    **Model:** `ggml-org/embeddinggemma-300M-GGUF/embeddinggemma-300M-Q8_0.gguf`
+    
+    **Quantization:** Q8_0 (8-bit quantization for quality)
+    
+    **Usage:**
+    - Document chunking and embedding during `qmd embed`
+    - Query embedding during `qmd vsearch` and `qmd query`
+    
+    **Prompt Format:**
+    ```
+    # For queries
+    task: search result | query: {query}
+    
+    # For documents
+    title: {title} | text: {content}
+    ```
+  </Accordion>
+  
+  <Accordion title="qwen3-reranker-0.6b-q8_0 (~640MB)" icon="arrow-down-wide-short">
+    **Purpose:** Re-rank search results using cross-encoder scoring
+    
+    **Model:** `ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/qwen3-reranker-0.6b-q8_0.gguf`
+    
+    **Quantization:** Q8_0 (8-bit quantization)
+    
+    **Usage:**
+    - Re-ranks top 30 candidates in `qmd query` pipeline
+    - Returns yes/no relevance with logprob confidence scores
+    
+    **How it works:**
+    Uses node-llama-cpp's `createRankingContext()` API to score query-document pairs.
+  </Accordion>
+  
+  <Accordion title="qmd-query-expansion-1.7B-q4_k_m (~1.1GB)" icon="expand">
+    **Purpose:** Generate alternative query phrasings for better recall
+    
+    **Model:** `tobil/qmd-query-expansion-1.7B-gguf/qmd-query-expansion-1.7B-q4_k_m.gguf`
+    
+    **Quantization:** Q4_K_M (4-bit K-quant for efficiency)
+    
+    **Usage:**
+    - Generates 1-2 alternative queries in `qmd query` pipeline
+    - Original query is weighted 2x in fusion scoring
+    
+    **Fine-tuned:** This model is specifically fine-tuned for QMD's query expansion task.
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+  Models are cached in `~/.cache/qmd/models/` by default. You can set `XDG_CACHE_HOME` to change the cache directory.
+</Note>
+
+### Model Download
+
+Models download automatically on first use:
+
+<Steps>
+  <Step title="First Command">
+    Run any command that requires models (e.g., `qmd embed` or `qmd query`):
+    
+    ```bash
+    qmd embed
+    ```
+  </Step>
+  
+  <Step title="Automatic Download">
+    QMD detects missing models and downloads them from HuggingFace:
+    
+    ```
+    Downloading embeddinggemma-300M-Q8_0.gguf...
+    [████████████████████████████████] 300MB/300MB
+    ```
+    
+    Progress is shown in the terminal.
+  </Step>
+  
+  <Step title="Cache and Reuse">
+    Models are cached locally. Subsequent commands use the cached versions instantly.
+  </Step>
+</Steps>
+
+### Manual Model Download
+
+If you prefer to download models explicitly before first use:
+
+```bash
+# Download all models (requires LLM session)
+qmd embed --help  # Triggers model check/download
+```
+
+Or download directly from HuggingFace:
+
+```bash
+mkdir -p ~/.cache/qmd/models
+cd ~/.cache/qmd/models
+
+# Download embedding model
+wget https://huggingface.co/ggml-org/embeddinggemma-300M-GGUF/resolve/main/embeddinggemma-300M-Q8_0.gguf
+
+# Download reranker model
+wget https://huggingface.co/ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/resolve/main/qwen3-reranker-0.6b-q8_0.gguf
+
+# Download query expansion model
+wget https://huggingface.co/tobil/qmd-query-expansion-1.7B-gguf/resolve/main/qmd-query-expansion-1.7B-q4_k_m.gguf
+```
+
+## Storage Locations
+
+QMD uses XDG Base Directory conventions:
+
+| Data | Location | Environment Variable |
+|------|----------|----------------------|
+| Index database | `~/.cache/qmd/index.sqlite` | `XDG_CACHE_HOME` |
+| GGUF models | `~/.cache/qmd/models/` | `XDG_CACHE_HOME` |
+| Collection config | `~/.config/qmd/index.yml` | `XDG_CONFIG_HOME` |
+
+<Tip>
+  Set `XDG_CACHE_HOME` or `XDG_CONFIG_HOME` to customize storage locations:
+  
+  ```bash
+  export XDG_CACHE_HOME=~/my-cache
+  export XDG_CONFIG_HOME=~/my-config
+  ```
+</Tip>
+
+## Verify Installation
+
+Confirm QMD is installed and check version:
+
+```bash
+qmd --version
+```
+
+Expected output:
+```
+qmd version 1.1.0
+```
+
+Check index status (creates empty database if missing):
+
+```bash
+qmd status
+```
+
+Expected output:
+```
+Index: /Users/you/.cache/qmd/index.sqlite
+Documents: 0
+Collections: 0
+Embeddings: 0 (0%)
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Node version too old">
+    **Error:** `SyntaxError: Unexpected token '??='`
+    
+    **Solution:** Upgrade to Node.js 22+:
+    
+    ```bash
+    # Using nvm
+    nvm install 22
+    nvm use 22
+    
+    # Or download from nodejs.org
+    # https://nodejs.org/
+    ```
+  </Accordion>
+  
+  <Accordion title="sqlite-vec extension not loading (macOS)">
+    **Error:** `Error loading sqlite-vec extension`
+    
+    **Solution:** Install Homebrew SQLite:
+    
+    ```bash
+    brew install sqlite
+    ```
+    
+    Make sure Homebrew's SQLite is in your PATH before system SQLite.
+  </Accordion>
+  
+  <Accordion title="Model download fails">
+    **Error:** `Failed to download model from HuggingFace`
+    
+    **Solutions:**
+    
+    1. Check internet connection
+    2. Try again (HuggingFace can be slow)
+    3. Download manually (see Manual Model Download above)
+    4. Check firewall/proxy settings
+  </Accordion>
+  
+  <Accordion title="Out of disk space">
+    **Error:** `ENOSPC: no space left on device`
+    
+    **Solution:** Free up at least 3GB of space for models and index data.
+    
+    Check current usage:
+    ```bash
+    du -sh ~/.cache/qmd
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<Card title="Quick Start" icon="rocket" href="/quickstart">
+  Get your first search working with a step-by-step tutorial
+</Card>

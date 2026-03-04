@@ -1,0 +1,202 @@
+---
+title: qmd collection
+description: Manage indexed collections of documents
+---
+
+Manage collections — indexed folders containing markdown files or other documents.
+
+## Usage
+
+```bash
+qmd collection <command> [options]
+```
+
+## Subcommands
+
+### add
+
+Create and index a new collection.
+
+```bash
+qmd collection add <path> [--name NAME] [--mask PATTERN]
+```
+
+<ParamField path="path" type="string" required>
+  Directory to index (use `.` for current directory)
+</ParamField>
+
+<ParamField path="--name" type="string">
+  Collection name (defaults to directory basename)
+</ParamField>
+
+<ParamField path="--mask" type="string" default="**/*.md">
+  Glob pattern for files to index
+</ParamField>
+
+**Examples:**
+
+```bash
+# Index current directory with default name
+qmd collection add .
+
+# Index with custom name
+qmd collection add ~/Documents/notes --name mynotes
+
+# Index all text files
+qmd collection add ~/docs --name docs --mask '**/*.txt'
+```
+
+### list
+
+List all indexed collections with stats.
+
+```bash
+qmd collection list
+```
+
+Shows collection name, virtual path, glob pattern, file count, last update time, and whether excluded from default queries.
+
+### remove
+
+Remove a collection and all its indexed documents.
+
+```bash
+qmd collection remove <name>
+qmd collection rm <name>  # alias
+```
+
+<ParamField path="name" type="string" required>
+  Collection name to remove
+</ParamField>
+
+**Example:**
+
+```bash
+qmd collection remove old-notes
+```
+
+### rename
+
+Rename a collection (updates virtual paths).
+
+```bash
+qmd collection rename <old-name> <new-name>
+qmd collection mv <old-name> <new-name>  # alias
+```
+
+<ParamField path="old-name" type="string" required>
+  Current collection name
+</ParamField>
+
+<ParamField path="new-name" type="string" required>
+  New collection name
+</ParamField>
+
+**Example:**
+
+```bash
+qmd collection rename mynotes personal-notes
+```
+
+### show
+
+Display detailed information about a collection.
+
+```bash
+qmd collection show <name>
+qmd collection info <name>  # alias
+```
+
+<ParamField path="name" type="string" required>
+  Collection name
+</ParamField>
+
+Shows path, glob pattern, include status, update command, and context count.
+
+### update-cmd
+
+Set a shell command to run before indexing (e.g., `git pull`).
+
+```bash
+qmd collection update-cmd <name> [command]
+```
+
+<ParamField path="name" type="string" required>
+  Collection name
+</ParamField>
+
+<ParamField path="command" type="string">
+  Shell command to run before indexing. Omit to clear the command.
+</ParamField>
+
+**Examples:**
+
+```bash
+# Set git pull as update command
+qmd collection update-cmd brain 'git pull'
+
+# More complex update command
+qmd collection update-cmd notes 'git stash && git pull --rebase --ff-only && git stash pop'
+
+# Clear update command
+qmd collection update-cmd brain
+```
+
+### include
+
+Include collection in default queries (when no `-c` filter specified).
+
+```bash
+qmd collection include <name>
+```
+
+<ParamField path="name" type="string" required>
+  Collection name
+</ParamField>
+
+### exclude
+
+Exclude collection from default queries. Requires explicit `-c <name>` to search.
+
+```bash
+qmd collection exclude <name>
+```
+
+<ParamField path="name" type="string" required>
+  Collection name
+</ParamField>
+
+**Example:**
+
+```bash
+# Exclude archive from default searches
+qmd collection exclude archive
+
+# Later search only archive explicitly
+qmd query "old notes" -c archive
+```
+
+## Virtual Paths
+
+Collections use virtual path format: `qmd://<collection>/<path>`
+
+Examples:
+- `qmd://notes/readme.md`
+- `qmd://journals/2025/may.md`
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="qmd update" icon="arrows-rotate" href="/cli/update">
+    Re-index all collections
+  </Card>
+  <Card title="qmd ls" icon="list" href="/cli/collection#list">
+    List files in a collection
+  </Card>
+  <Card title="qmd context" icon="message" href="/cli/context">
+    Add context to collections
+  </Card>
+  <Card title="qmd status" icon="chart-line" href="/cli/status">
+    View collection health
+  </Card>
+</CardGroup>

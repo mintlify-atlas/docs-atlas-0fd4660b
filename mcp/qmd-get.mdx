@@ -1,0 +1,277 @@
+---
+title: get Tool
+description: Retrieve a single document by path or docid
+---
+
+## Overview
+
+The `get` tool retrieves the full content of a document by its file path or docid. Use paths or docids from search results to fetch complete documents.
+
+## Input Schema
+
+<ParamField path="file" type="string" required>
+  File path, docid, or path with line number suffix
+  
+  **Formats:**
+  - `pages/meeting.md` — Relative file path
+  - `#abc123` — Docid from search results (# prefix optional)
+  - `pages/meeting.md:100` — Path with line offset
+</ParamField>
+
+<ParamField path="fromLine" type="number">
+  Start reading from this line number (1-indexed). Overrides `:line` suffix in `file`.
+</ParamField>
+
+<ParamField path="maxLines" type="number">
+  Maximum number of lines to return. Truncates long documents.
+</ParamField>
+
+<ParamField path="lineNumbers" type="boolean" default="false">
+  Add line numbers to output (format: `N: content`)
+</ParamField>
+
+## Response Format
+
+### Success
+
+<ResponseField name="content" type="array">
+  Array with a single resource object
+  
+  <Expandable title="content[0]">
+    <ResponseField name="type" type="string">
+      Always `"resource"`
+    </ResponseField>
+    
+    <ResponseField name="resource" type="object">
+      <Expandable title="resource object">
+        <ResponseField name="uri" type="string">
+          QMD URI (e.g., `qmd://collection/path/to/file.md`)
+        </ResponseField>
+        
+        <ResponseField name="name" type="string">
+          Display name (collection/path)
+        </ResponseField>
+        
+        <ResponseField name="title" type="string">
+          Document title from frontmatter or first heading
+        </ResponseField>
+        
+        <ResponseField name="mimeType" type="string">
+          Always `"text/markdown"`
+        </ResponseField>
+        
+        <ResponseField name="text" type="string">
+          Full document content, optionally with line numbers and context
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Error
+
+<ResponseField name="content" type="array">
+  Array with a single text element
+  
+  <Expandable title="content[0]">
+    <ResponseField name="type" type="string">
+      Always `"text"`
+    </ResponseField>
+    
+    <ResponseField name="text" type="string">
+      Error message with suggestions for similar files
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="isError" type="boolean">
+  Always `true` for errors
+</ResponseField>
+
+## Examples
+
+### Retrieve by Path
+
+**Request:**
+```json
+{
+  "file": "docs/errors.md"
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "resource",
+      "resource": {
+        "uri": "qmd://myproject/docs/errors.md",
+        "name": "myproject/docs/errors.md",
+        "title": "Error Handling Guide",
+        "mimeType": "text/markdown",
+        "text": "# Error Handling Guide\n\nThis document describes error handling patterns...\n"
+      }
+    }
+  ]
+}
+```
+
+### Retrieve by Docid
+
+**Request:**
+```json
+{
+  "file": "#abc123"
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "resource",
+      "resource": {
+        "uri": "qmd://myproject/src/errors.ts",
+        "name": "myproject/src/errors.ts",
+        "title": "errors.ts",
+        "mimeType": "text/markdown",
+        "text": "<!-- Context: Source code for error utilities -->\n\nexport function handleError(err: Error) {\n  logger.error(err.message);\n}\n"
+      }
+    }
+  ]
+}
+```
+
+Note the `<!-- Context: ... -->` prefix from `qmd context add`.
+
+### Start at Specific Line
+
+**Request:**
+```json
+{
+  "file": "docs/api.md:100"
+}
+```
+
+Or equivalently:
+```json
+{
+  "file": "docs/api.md",
+  "fromLine": 100
+}
+```
+
+### With Line Numbers
+
+**Request:**
+```json
+{
+  "file": "src/utils.ts",
+  "lineNumbers": true
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "resource",
+      "resource": {
+        "uri": "qmd://myproject/src/utils.ts",
+        "name": "myproject/src/utils.ts",
+        "title": "utils.ts",
+        "mimeType": "text/markdown",
+        "text": "1: export function formatDate(date: Date): string {\n2:   return date.toISOString();\n3: }\n"
+      }
+    }
+  ]
+}
+```
+
+### Truncate Long Documents
+
+**Request:**
+```json
+{
+  "file": "docs/architecture.md",
+  "maxLines": 50
+}
+```
+
+Returns only the first 50 lines.
+
+### File Not Found
+
+**Request:**
+```json
+{
+  "file": "docs/missing.md"
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "Document not found: docs/missing.md\n\nDid you mean one of these?\n  - docs/api.md\n  - docs/errors.md"
+    }
+  ],
+  "isError": true
+}
+```
+
+## Path Resolution
+
+The tool tries multiple strategies to find documents:
+
+1. **Exact match** — `collection` + `path`
+2. **Suffix match** — If exact match fails, finds paths ending with the query
+3. **Docid lookup** — If `file` starts with `#`, treats it as a docid
+
+This means you can use shortened paths:
+```json
+{ "file": "errors.md" }  // Matches docs/errors.md
+```
+
+## Context Metadata
+
+If you've added context with `qmd context add`, it appears as a comment at the top:
+
+```markdown
+<!-- Context: Source code for error utilities -->
+
+export function handleError(err: Error) {
+  ...
+}
+```
+
+This helps LLMs understand the file's purpose without additional prompting.
+
+## CLI Equivalent
+
+```bash
+qmd get docs/errors.md
+qmd get "#abc123"
+qmd get docs/errors.md:100
+```
+
+Add `--line-numbers` for numbered output.
+
+## Related Tools
+
+<CardGroup cols={2}>
+  <Card title="multi_get Tool" icon="files" href="/mcp/qmd-multi-get">
+    Retrieve multiple documents by glob pattern
+  </Card>
+  <Card title="query Tool" icon="magnifying-glass" href="/mcp/qmd-search">
+    Search to find document paths and docids
+  </Card>
+  <Card title="Context" icon="info" href="/cli/context">
+    Add context metadata with qmd context
+  </Card>
+</CardGroup>

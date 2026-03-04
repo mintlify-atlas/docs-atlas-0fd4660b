@@ -1,0 +1,195 @@
+---
+title: qmd query
+description: Hybrid search with query expansion and reranking (recommended)
+---
+
+Hybrid search combining BM25 keywords, vector embeddings, query expansion, and neural reranking. **This is the recommended search command** for best results.
+
+## Usage
+
+```bash
+qmd query [options] <query>
+```
+
+<ParamField path="query" type="string" required>
+  Natural language query or structured query document
+</ParamField>
+
+## Options
+
+<ParamField path="-c, --collection" type="string">
+  Filter by collection name (can be specified multiple times). Defaults to all included collections.
+</ParamField>
+
+<ParamField path="-n" type="number" default="5 (CLI), 20 (JSON/files)">
+  Maximum number of results
+</ParamField>
+
+<ParamField path="--all" type="boolean" default="false">
+  Return all matches (use with `--min-score`)
+</ParamField>
+
+<ParamField path="--min-score" type="number" default="0">
+  Minimum score threshold (0-1)
+</ParamField>
+
+<ParamField path="--full" type="boolean" default="false">
+  Show full document instead of best chunk
+</ParamField>
+
+<ParamField path="--line-numbers" type="boolean" default="false">
+  Add line numbers to output
+</ParamField>
+
+<ParamField path="--json" type="boolean" default="false">
+  Output as JSON
+</ParamField>
+
+<ParamField path="--csv" type="boolean" default="false">
+  Output as CSV
+</ParamField>
+
+<ParamField path="--md" type="boolean" default="false">
+  Output as Markdown
+</ParamField>
+
+<ParamField path="--xml" type="boolean" default="false">
+  Output as XML
+</ParamField>
+
+<ParamField path="--files" type="boolean" default="false">
+  Output file paths only (with docid and score)
+</ParamField>
+
+## How It Works
+
+### Automatic Mode (recommended)
+
+Single-line natural language query:
+
+```bash
+qmd query "how does authentication work"
+```
+
+1. **BM25 check** — Fast keyword search for strong signals
+2. **Query expansion** — Generate lex/vec/hyde variations if needed
+3. **Hybrid search** — Combine BM25 + vector results using RRF
+4. **Neural reranking** — Score all chunks with cross-encoder model
+5. **Best chunks** — Return highest-scoring chunks per document
+
+### Structured Mode (advanced)
+
+Multi-line query with explicit strategy per line:
+
+```bash
+qmd query $'lex: authentication security login\nvec: auth workflow\nhyde: JWT tokens stored in cookies'
+```
+
+Each line must start with `lex:`, `vec:`, or `hyde:`:
+
+- **lex:** BM25 keyword search (supports phrases, proximity, negation)
+- **vec:** Vector semantic search
+- **hyde:** Hypothetical document (generates text that would answer the query)
+
+## Query Syntax Grammar
+
+```
+query          = expand_query | query_document
+expand_query   = text | explicit_expand
+explicit_expand= "expand:" text
+query_document = { typed_line }
+typed_line     = type "" text newline
+type           = "lex" | "vec" | "hyde"
+text           = quoted_phrase | plain_text
+quoted_phrase  = '"' { character } '"'
+plain_text     = { character }
+newline        = "\n"
+```
+
+## Examples
+
+### Automatic Queries
+
+```bash
+# Natural language
+qmd query "how does deployment work"
+
+# Technical terms
+qmd query "kubernetes ingress configuration"
+
+# Specific collection
+qmd query "meeting notes from March" -c journals
+
+# Multiple collections
+qmd query "API design" -c docs -c wiki
+
+# High-quality results only
+qmd query "error handling" --min-score 0.5 -n 10
+```
+
+### Structured Queries
+
+```bash
+# Combine keyword + semantic
+qmd query $'lex: CAP theorem consistency\nvec: distributed systems tradeoffs'
+
+# Exact phrase + vector search
+qmd query $'lex: "API gateway" authentication\nvec: microservices security'
+
+# Hypothetical document search
+qmd query $'hyde: The authentication system uses JWT tokens with refresh rotation...'
+
+# Complex multi-strategy
+qmd query $'lex: kubernetes deployment -docker\nvec: container orchestration\nhyde: Deploy to cluster using kubectl apply'
+```
+
+## Query Expansion
+
+When using automatic mode, QMD generates multiple query variations:
+
+```
+Original: "how does auth work"
+├─ lex: authentication authorization security login
+├─ vec: authentication workflow authorization flow
+└─ hyde: Authentication uses JWT tokens stored in cookies...
+```
+
+Expansion is **skipped** if BM25 finds strong keyword matches (score > 15).
+
+## Reranking Model
+
+Default model: `qwen3-reranker` (Qwen/Qwen2.5-3B-Instruct-qn_k_m from Hugging Face)
+
+- Cross-encoder scoring for relevance
+- Processes all chunks from top documents
+- Selects best chunk per document
+
+## Performance
+
+Typical query times:
+
+- **Strong BM25 signal:** 50-100ms (skips expansion)
+- **With expansion:** 500ms-2s (embedding + reranking)
+- **Large result sets:** 2-5s (more chunks to rerank)
+
+Progress feedback shown during:
+- Query expansion
+- Embedding generation
+- Reranking
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="qmd search" icon="magnifying-glass" href="/cli/search">
+    Fast BM25 keyword search only
+  </Card>
+  <Card title="qmd vsearch" icon="vector-square" href="/cli/vsearch">
+    Vector semantic search only
+  </Card>
+  <Card title="qmd embed" icon="cube" href="/cli/embed">
+    Generate embeddings
+  </Card>
+  <Card title="Search guide" icon="book" href="/guides/searching">
+    Learn search strategies
+  </Card>
+</CardGroup>

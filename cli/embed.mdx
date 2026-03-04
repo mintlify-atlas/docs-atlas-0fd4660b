@@ -1,0 +1,137 @@
+---
+title: qmd embed
+description: Generate vector embeddings for semantic search
+---
+
+Generate or refresh vector embeddings for all indexed documents. Required for vector and hybrid search.
+
+## Usage
+
+```bash
+qmd embed [options]
+```
+
+## Options
+
+<ParamField path="-f, --force" type="boolean" default="false">
+  Force re-embedding all documents (clears existing vectors)
+</ParamField>
+
+## How It Works
+
+1. **Find documents** — Identifies unique content hashes needing embeddings
+2. **Chunk documents** — Splits large documents into 900-token chunks with 15% overlap
+3. **Generate embeddings** — Processes chunks in batches using embedding model
+4. **Store vectors** — Saves embeddings to sqlite-vec table for fast similarity search
+
+## Chunking Strategy
+
+- **Max tokens:** 900 per chunk
+- **Overlap:** 15% (135 tokens)
+- **Boundaries:** Prefers markdown headings as split points
+- **Multi-chunk docs:** Large documents split into multiple chunks
+
+## Embedding Model
+
+Default: `embeddinggemma` (google/gemma-2-2b-it-qn_k_m from Hugging Face)
+
+- **Dimensions:** 2048
+- **Format:** GGUF quantized (qn_k_m)
+- **Storage:** `~/.cache/qmd/models/`
+
+## Examples
+
+```bash
+# Embed new/changed documents
+qmd embed
+
+# Force re-embed everything
+qmd embed --force
+qmd embed -f
+```
+
+## Output
+
+Shows progress with:
+
+- Total documents and chunks
+- Progress bar with percentage
+- Throughput (MB/s)
+- ETA
+- Error count (if any)
+
+Example output:
+
+```
+Embedding 42 documents (156 chunks, 2.3 MB)
+4 documents split into multiple chunks
+Model: embeddinggemma
+
+████████████████████████████░░ 89% 139/156  1.2 MB/s ETA 2s
+```
+
+On completion:
+
+```
+████████████████████████████████ 100%
+
+✓ Done! Embedded 156 chunks from 42 documents in 32s (73 KB/s)
+```
+
+## Performance
+
+Typical throughput:
+
+- **GPU (CUDA/Metal/Vulkan):** 500KB-2MB/s
+- **CPU only:** 50-200KB/s
+
+Batch size: 32 chunks (balances memory and efficiency)
+
+## When to Run
+
+Run `qmd embed` after:
+
+1. **Adding collections** — `qmd collection add`
+2. **Updating content** — `qmd update`
+3. **First install** — Before using vector/hybrid search
+
+QMD reminds you when embeddings are needed:
+
+```
+Run 'qmd embed' to update embeddings (23 unique hashes need vectors)
+```
+
+## Force Re-embedding
+
+Use `--force` when:
+
+- Switching embedding models
+- Fixing corrupted embeddings
+- Changing chunking parameters (requires code rebuild)
+
+⚠️ **Warning:** Force re-embedding clears all existing vectors and takes longer.
+
+## Deduplication
+
+Embeddings are stored by content hash:
+
+- Identical content only embedded once
+- Saves time and storage
+- Shared chunks across documents
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="qmd query" icon="sparkles" href="/cli/query">
+    Hybrid search (uses embeddings)
+  </Card>
+  <Card title="qmd vsearch" icon="vector-square" href="/cli/vsearch">
+    Vector semantic search
+  </Card>
+  <Card title="qmd update" icon="arrows-rotate" href="/cli/update">
+    Re-index collections
+  </Card>
+  <Card title="qmd status" icon="chart-line" href="/cli/status">
+    Check embedding coverage
+  </Card>
+</CardGroup>

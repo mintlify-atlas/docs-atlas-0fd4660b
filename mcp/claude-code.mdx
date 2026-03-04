@@ -1,0 +1,161 @@
+---
+title: Claude Code
+description: Configure QMD MCP server for Claude Code CLI and editor
+---
+
+## Overview
+
+QMD integrates with Claude Code (both the CLI and editor) via the Model Context Protocol. Claude Code has two configuration methods: a simplified plugin system, or manual MCP server configuration.
+
+## Plugin Installation (Recommended)
+
+The Claude Code marketplace provides a one-command installation:
+
+```bash
+claude marketplace add tobi/qmd
+claude plugin add qmd@qmd
+```
+
+This automatically configures the MCP server without manual JSON editing.
+
+### Verify Installation
+
+Check that QMD is active:
+
+```bash
+claude plugin list
+```
+
+You should see `qmd@qmd` in the output.
+
+## Manual MCP Configuration
+
+If you prefer manual configuration or the plugin isn't available, edit Claude Code's settings file.
+
+<Steps>
+  <Step title="Locate the settings file">
+    The configuration file is:
+    
+    ```
+    ~/.claude/settings.json
+    ```
+    
+    This expands to:
+    ```
+    /Users/[username]/.claude/settings.json     # macOS
+    /home/[username]/.claude/settings.json      # Linux
+    ```
+  </Step>
+
+  <Step title="Add QMD server configuration">
+    Edit the JSON file to add QMD under `mcpServers`:
+    
+    ```json
+    {
+      "mcpServers": {
+        "qmd": {
+          "command": "qmd",
+          "args": ["mcp"]
+        }
+      }
+    }
+    ```
+    
+    If you already have other servers:
+    
+    ```json
+    {
+      "mcpServers": {
+        "filesystem": {
+          "command": "npx",
+          "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/files"]
+        },
+        "qmd": {
+          "command": "qmd",
+          "args": ["mcp"]
+        }
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Restart Claude Code">
+    If using the editor, restart it. For the CLI, the config is loaded on each invocation.
+  </Step>
+
+  <Step title="Test the integration">
+    ```bash
+    claude "What collections are in my QMD index?"
+    ```
+    
+    Claude should use the `status` tool to list your collections.
+  </Step>
+</Steps>
+
+## Transport Mode
+
+Both the plugin and manual configuration use **stdio transport** by default. Each Claude Code session launches `qmd mcp` as a subprocess.
+
+### When to Use HTTP Transport
+
+Switch to HTTP transport if:
+- You use QMD frequently throughout the day
+- You want models to stay loaded in memory
+- You use multiple MCP clients (Desktop + Code) and want to share one daemon
+
+See [HTTP Transport](/mcp/http-transport) for daemon setup.
+
+## Available Tools
+
+Claude Code gets the same six tools as Claude Desktop:
+
+- `query` — Deep search with sub-queries (lex/vec/hyde)
+- `get` — Retrieve document by path or docid
+- `multi_get` — Batch retrieve by glob pattern
+- `status` — Index health and collections
+
+Documents are accessible via `qmd://` resource URIs.
+
+## Troubleshooting
+
+### Plugin not found
+
+If `claude marketplace add tobi/qmd` fails, the plugin may not be published yet. Use manual configuration instead.
+
+### Command not found
+
+If Claude Code reports `qmd: command not found`, verify installation:
+
+```bash
+which qmd
+qmd --version
+```
+
+If `qmd` is installed but not in PATH, use the full path in `settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "qmd": {
+      "command": "/usr/local/bin/qmd",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Settings not taking effect
+
+For the CLI:
+- Settings are loaded on each invocation, no restart needed
+- Check for JSON syntax errors
+
+For the editor:
+- Completely quit and restart the editor
+- Check logs for MCP initialization errors
+
+## Next Steps
+
+- [Claude Desktop Configuration](/mcp/claude-desktop)
+- [HTTP Transport Mode](/mcp/http-transport)
+- [Search Tools Reference](/cli/search)

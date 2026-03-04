@@ -1,0 +1,337 @@
+---
+title: Context Management
+description: Add hierarchical metadata to improve search quality and LLM understanding
+---
+
+Context is descriptive metadata attached to collections and paths. QMD embeds context alongside document chunks, helping search understand what documents are about and providing critical information to LLMs.
+
+## Why Context Matters
+
+Without context, search results lack semantic grounding:
+
+```
+Title: Q4 Planning
+Score: 72%
+
+Discussion about metrics and goals...
+```
+
+With context, results include rich metadata:
+
+```
+Title: Q4 Planning
+Context: Meeting transcripts → Executive team meetings
+Score: 72%
+
+Discussion about metrics and goals...
+```
+
+This is especially critical for LLMs using QMD via [MCP](/guides/mcp-server) — context helps them understand document provenance and relevance.
+
+## How Context Works
+
+Context is **hierarchical** and **collection-scoped**. Documents inherit context from:
+
+1. **Global context** (applies to all collections)
+2. **Collection root context** (applies to entire collection)
+3. **Path-specific context** (applies to subdirectories)
+
+Multiple contexts are concatenated with double newlines when returned in search results.
+
+### Context Tree Example
+
+Given this configuration:
+
+```yaml
+global_context: "Knowledge base for engineering projects"
+
+collections:
+  notes:
+    path: /Users/name/Documents/notes
+    pattern: "**/*.md"
+    context:
+      /: "Personal notes and ideas"
+      /work: "Work-related notes"
+      /work/meetings: "Meeting transcripts from 2024"
+```
+
+A document at `qmd://notes/work/meetings/2024-03-15.md` inherits all matching contexts:
+
+```
+Knowledge base for engineering projects
+
+Personal notes and ideas
+
+Work-related notes
+
+Meeting transcripts from 2024
+```
+
+## Adding Context
+
+### From Current Directory
+
+If you're inside a collection directory, QMD auto-detects the collection:
+
+```bash
+cd ~/Documents/notes
+qmd context add "Personal notes and ideas"
+```
+
+```bash
+cd ~/Documents/notes/work
+qmd context add "Work-related notes"
+```
+
+### Using Virtual Paths
+
+Add context to any collection path using `qmd://` syntax:
+
+```bash
+qmd context add qmd://notes "Personal notes and ideas"
+qmd context add qmd://notes/journal "Daily journal entries"
+qmd context add qmd://docs/api "API documentation"
+```
+
+### Global Context
+
+Global context applies to **all collections**:
+
+```bash
+qmd context add / "Knowledge base for engineering team"
+```
+
+This is useful for:
+- System-level instructions for LLMs
+- Organization or team context
+- Default metadata that applies everywhere
+
+## Listing Contexts
+
+```bash
+qmd context list
+```
+
+Example output:
+
+```
+*          /              Knowledge base for engineering team
+notes      /              Personal notes and ideas  
+notes      /journal       Daily journal entries
+notes      /work          Work-related notes
+docs       /api           API documentation
+docs       /guides        Implementation guides
+```
+
+The `*` indicates global context.
+
+## Removing Context
+
+```bash Remove path context
+qmd context rm qmd://notes/old-project
+```
+
+```bash Remove collection root context
+qmd context rm qmd://notes/
+```
+
+```bash Remove global context
+qmd context rm /
+```
+
+## Checking for Missing Context
+
+```bash
+qmd context check
+```
+
+This identifies:
+- Collections without any context
+- Top-level directories in collections that lack specific context
+
+Example output:
+
+```
+Collections without context:
+  archive    ~/old-notes     142 docs
+
+Top-level paths without context in 'notes':
+  /2023
+  /drafts
+```
+
+<Tip>
+Add context **before** running `qmd embed`. Context is embedded with document chunks and can't be retroactively added without re-embedding.
+</Tip>
+
+## Context in Search Results
+
+Context appears in all search output formats:
+
+### CLI Output
+
+```bash
+qmd query "authentication"
+```
+
+```
+docs/api/auth.md:15 #a1b2c3
+Title: Authentication Guide
+Context: API documentation
+Score: 89%
+
+This guide covers OAuth 2.0 implementation...
+```
+
+### JSON Output
+
+```bash
+qmd query "authentication" --json
+```
+
+```json
+[
+  {
+    "filepath": "qmd://docs/api/auth.md",
+    "docid": "#a1b2c3",
+    "title": "Authentication Guide",
+    "context": "API documentation",
+    "score": 0.89,
+    "snippet": "This guide covers OAuth 2.0 implementation..."
+  }
+]
+```
+
+### MCP Results
+
+When using QMD via [MCP](/guides/mcp-server), context is included in tool results:
+
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "docs/api/auth.md (Context: API documentation)\n\nThis guide covers OAuth 2.0 implementation..."
+    }
+  ]
+}
+```
+
+## Context Configuration File
+
+Contexts are stored in `~/.config/qmd/index.yml`:
+
+```yaml
+global_context: "Engineering knowledge base"
+
+collections:
+  notes:
+    path: /Users/name/notes
+    pattern: "**/*.md"
+    context:
+      /: "Personal notes"
+      /work: "Work notes"
+      /work/meetings: "Team meeting transcripts"
+  
+  docs:
+    path: /Users/name/docs
+    pattern: "**/*.md"
+    context:
+      /api: "API reference documentation"
+      /guides: "Implementation guides and tutorials"
+```
+
+You can edit this file directly, but using `qmd context add` ensures proper validation.
+
+## Context and Embeddings
+
+Context is **embedded with document chunks** during `qmd embed`. Each chunk's embedding includes:
+
+```
+title: {document title} | text: {chunk text}
+```
+
+Context is **not** embedded in the vector itself, but is:
+- Stored in the database alongside chunks
+- Returned with search results
+- Used by LLMs to understand document relevance
+
+This means context affects search through:
+1. **Improved LLM decision-making** (reranking, query expansion)
+2. **Better document selection** by agents using MCP
+3. **User clarity** about result provenance
+
+<Warning>
+Changing context doesn't automatically update embeddings. If you significantly change context, consider re-embedding:
+
+```bash
+qmd embed -f
+```
+</Warning>
+
+## Best Practices
+
+<AccordionGroup>
+
+<Accordion title="Be specific and descriptive">
+Good context is concise but informative:
+
+✅ `"Meeting transcripts from Q4 2024 executive team"`  
+❌ `"Meetings"`
+
+✅ `"Internal API reference for authentication services"`  
+❌ `"Docs"`
+</Accordion>
+
+<Accordion title="Use hierarchy effectively">
+Start general at the collection root, then get specific in subdirectories:
+
+```yaml
+context:
+  /: "Engineering documentation"
+  /api: "REST API reference"
+  /api/auth: "Authentication and authorization endpoints"
+```
+</Accordion>
+
+<Accordion title="Add context before embedding">
+Context doesn't affect embeddings directly, but it's best practice to define it before running `qmd embed` so it's available from the start.
+</Accordion>
+
+<Accordion title="Use global context for system instructions">
+Global context is perfect for LLM instructions:
+
+```bash
+qmd context add / "This is an engineering team knowledge base. Documents include meeting notes, technical designs, and API documentation. Always cite sources by filepath when answering questions."
+```
+</Accordion>
+
+<Accordion title="Check context regularly">
+Run `qmd context check` periodically to identify gaps, especially after adding new collections or directory structures.
+</Accordion>
+
+</AccordionGroup>
+
+## Context in LLM Workflows
+
+When using QMD with LLMs (via MCP or CLI), context helps models:
+
+1. **Understand document type** (meeting notes vs API docs vs journal entries)
+2. **Assess relevance** (is this internal docs or public knowledge?)
+3. **Cite accurately** (context provides provenance information)
+4. **Filter appropriately** (which collection to search based on user intent)
+
+For example, an LLM can see:
+
+```
+Context: Internal engineering documentation → API reference
+```
+
+And understand this is authoritative internal documentation, not general web content.
+
+## Related
+
+- [Collections](/concepts/collections) - Organizing documents into searchable units
+- [Embeddings](/concepts/embeddings) - How context relates to vector search
+- [MCP Server](/guides/mcp-server) - Using QMD with LLMs
+- [CLI Reference](/cli/context) - Context management commands

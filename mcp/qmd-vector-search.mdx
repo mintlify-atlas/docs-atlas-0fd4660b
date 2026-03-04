@@ -1,0 +1,126 @@
+---
+title: Vector Search (vec)
+description: Semantic vector search using embeddings
+---
+
+<Note>
+This page documents the `vec` sub-query type used with the `query` tool. See [query Tool](/mcp/qmd-search) for the full search API.
+</Note>
+
+## Overview
+
+**Vector search** (`vec`) finds documents by semantic meaning rather than exact keywords. It uses embeddings to match questions with relevant content even when the exact terms don't appear in the document.
+
+## Requirements
+
+Vector search requires embeddings. Run:
+
+```bash
+qmd embed
+```
+
+This generates embeddings for all documents using `embeddinggemma` via node-llama-cpp. Check status:
+
+```bash
+qmd status
+```
+
+Look for:
+- `Vector index: yes`
+- `Needs embedding: 0`
+
+## When to Use vec
+
+**Use vec when:**
+- You don't know the exact terminology
+- You want conceptual matches
+- The query is a natural language question
+
+**Examples:**
+- "how does authentication work?"
+- "what are the tradeoffs between consistency and availability?"
+- "why would a connection timeout?"
+
+**Don't use vec when:**
+- You know the exact term or function name (use `lex` instead)
+- You want only exact matches
+
+## Query Format
+
+Write a natural language question:
+
+```json
+{
+  "type": "vec",
+  "query": "how does the rate limiter handle burst traffic?"
+}
+```
+
+Keep queries focused (1-2 sentences). Longer queries dilute the embedding signal.
+
+## How It Works
+
+1. **Query Embedding** — Your question is converted to a 384-dimensional vector
+2. **Similarity Search** — sqlite-vec finds the top N chunks by cosine similarity
+3. **Result Ranking** — Documents are scored and ranked by best chunk match
+
+## Combining with lex
+
+Best practice: **combine vec with lex** for both semantic and keyword matches.
+
+```json
+{
+  "searches": [
+    { "type": "lex", "query": "rate limit" },
+    { "type": "vec", "query": "how does rate limiting prevent abuse" }
+  ]
+}
+```
+
+Results are combined using Reciprocal Rank Fusion (RRF). The first sub-query gets 2× weight, so put your strongest signal first.
+
+## Example: Concept Search
+
+**Query:**
+```json
+{
+  "searches": [
+    { "type": "vec", "query": "what is eventual consistency?" }
+  ],
+  "limit": 5
+}
+```
+
+**Results:**
+Finds documents about eventual consistency even if they use terms like "asynchronous replication", "convergence", or "BASE properties" instead of the exact phrase "eventual consistency".
+
+## Limitations
+
+- **Embedding Quality** — Results depend on embedding model quality. QMD uses embeddinggemma (137M params).
+- **Chunk Boundaries** — Documents are split into ~900 token chunks. Relevant content split across chunks may score lower.
+- **No Negation** — Unlike `lex`, you can't exclude terms with `-keyword`.
+
+## CLI Equivalent
+
+```bash
+qmd vsearch "how does authentication work?"
+```
+
+Note: `qmd query` (CLI) uses automatic expansion which may include vec searches, while `qmd vsearch` is pure vector search.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="lex Search" icon="keyword" href="/mcp/qmd-search#lex--bm25-keyword-search">
+    BM25 keyword search with phrase and negation support
+  </Card>
+  <Card title="hyde Search" icon="sparkles" href="/mcp/qmd-deep-search">
+    Hypothetical document embeddings for nuanced queries
+  </Card>
+  <Card title="query Tool" icon="magnifying-glass" href="/mcp/qmd-search">
+    Full search API with multi-strategy queries
+  </Card>
+  <Card title="Embeddings" icon="cube" href="/concepts/embeddings">
+    How QMD generates and uses embeddings
+  </Card>
+</CardGroup>

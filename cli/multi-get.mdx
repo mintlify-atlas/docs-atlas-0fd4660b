@@ -1,0 +1,222 @@
+---
+title: qmd multi-get
+description: Retrieve multiple documents by glob pattern or list
+---
+
+Batch fetch multiple documents using glob patterns or comma-separated lists.
+
+## Usage
+
+```bash
+qmd multi-get <pattern> [options]
+```
+
+<ParamField path="pattern" type="string" required>
+  Either:
+  - Glob pattern: `journals/2025-*.md`
+  - Comma-separated list: `readme.md, install.md, #abc123`
+</ParamField>
+
+## Options
+
+<ParamField path="-l" type="number">
+  Maximum lines per file
+</ParamField>
+
+<ParamField path="--max-bytes" type="number" default="10240">
+  Skip files larger than this (in bytes). Large files show skip message.
+</ParamField>
+
+<ParamField path="--json" type="boolean" default="false">
+  Output as JSON array
+</ParamField>
+
+<ParamField path="--csv" type="boolean" default="false">
+  Output as CSV
+</ParamField>
+
+<ParamField path="--md" type="boolean" default="false">
+  Output as Markdown
+</ParamField>
+
+<ParamField path="--xml" type="boolean" default="false">
+  Output as XML
+</ParamField>
+
+<ParamField path="--files" type="boolean" default="false">
+  Output file paths only with context
+</ParamField>
+
+## Examples
+
+### Glob Patterns
+
+```bash
+# All markdown files in subfolder
+qmd multi-get 'journals/2025-*.md'
+
+# All files matching pattern
+qmd multi-get '**/*-notes.md'
+
+# Specific month
+qmd multi-get 'journals/2025-05-*.md'
+```
+
+### Comma-Separated Lists
+
+```bash
+# Multiple filenames
+qmd multi-get 'readme.md, install.md, guide.md'
+
+# Mix of paths and docids
+qmd multi-get 'notes/readme.md, #abc123, guides/install.md'
+
+# Virtual paths
+qmd multi-get 'qmd://docs/api.md, qmd://notes/changelog.md'
+```
+
+### With Options
+
+```bash
+# Limit lines per file
+qmd multi-get 'journals/*.md' -l 50
+
+# Increase size limit
+qmd multi-get 'docs/*.md' --max-bytes 50000
+
+# JSON output
+qmd multi-get 'readme.md, install.md' --json
+
+# Export to CSV
+qmd multi-get '**/*.md' --csv > export.csv
+```
+
+## Output Formats
+
+### CLI (default)
+
+Separated with dividers, shows context headers:
+
+```
+============================================================
+File: qmd://notes/readme.md
+============================================================
+
+Folder Context: Project documentation
+---
+
+# Readme
+...
+
+============================================================
+File: qmd://notes/install.md
+============================================================
+...
+```
+
+### JSON
+
+Array of objects:
+
+```json
+[
+  {
+    "file": "qmd://notes/readme.md",
+    "title": "Readme",
+    "context": "Project documentation",
+    "body": "# Readme\n..."
+  }
+]
+```
+
+Skipped files (too large):
+
+```json
+{
+  "file": "qmd://notes/large.md",
+  "title": "Large File",
+  "skipped": true,
+  "reason": "File too large (150KB > 10KB). Use 'qmd get ...' to retrieve."
+}
+```
+
+### CSV
+
+Columns: `file,title,context,skipped,body`
+
+### Markdown
+
+Formatted with headings:
+
+```markdown
+---
+# Readme
+**context:** Project documentation
+
+# Readme content...
+```
+
+### XML
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document>
+    <file>qmd://notes/readme.md</file>
+    <title>Readme</title>
+    <context>Project documentation</context>
+    <body>...</body>
+  </document>
+</documents>
+```
+
+### Files
+
+Simple list with context:
+
+```
+qmd://notes/readme.md,"Project documentation"
+qmd://notes/install.md,"Installation guide"
+```
+
+## Size Limits
+
+Files larger than `--max-bytes` (default 10KB) are skipped to prevent overwhelming output:
+
+```bash
+# Default: skip files > 10KB
+qmd multi-get '*.md'
+
+# Increase to 50KB
+qmd multi-get '*.md' --max-bytes 51200
+
+# For large files, use get instead:
+qmd get large-file.md
+```
+
+Skipped files show a message with the reason and suggest using `qmd get`.
+
+## Line Truncation
+
+With `-l`, each file is truncated:
+
+```bash
+# Show first 100 lines per file
+qmd multi-get 'journals/*.md' -l 100
+```
+
+Truncated files show: `[... truncated N more lines]`
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="qmd get" icon="file" href="/cli/get">
+    Retrieve single document
+  </Card>
+  <Card title="qmd search" icon="magnifying-glass" href="/cli/search">
+    Search for documents
+  </Card>
+  <Card title="qmd ls" icon="list" href="/cli/collection#list">
+    List files in collection
+  </Card>
+</CardGroup>

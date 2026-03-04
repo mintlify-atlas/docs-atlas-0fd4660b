@@ -1,0 +1,261 @@
+---
+title: Collections
+description: Understanding how QMD organizes and indexes your documents
+---
+
+Collections are QMD's fundamental organizational unit. Each collection indexes a directory of documents using glob patterns, making them searchable through virtual paths.
+
+## What is a Collection?
+
+A collection is a named directory that QMD indexes. Collections map filesystem paths to a searchable index stored in SQLite, with each document identified by both:
+
+- **Virtual path**: `qmd://collection-name/relative/path.md`
+- **Document ID (docid)**: A 6-character hash like `#abc123`
+
+Collections are stored in `~/.config/qmd/index.yml` as YAML configuration.
+
+## Creating Collections
+
+<CodeGroup>
+
+```bash Basic
+qmd collection add ~/Documents/notes --name notes
+```
+
+```bash With Custom Glob Pattern
+qmd collection add ~/work/docs --name docs --mask "**/*.{md,txt}"
+```
+
+```bash Current Directory
+qmd collection add . --name myproject
+```
+
+</CodeGroup>
+
+### Default Glob Pattern
+
+If no `--mask` is provided, collections use the default pattern:
+
+```bash
+**/*.md
+```
+
+This recursively indexes all Markdown files in the collection directory.
+
+## Virtual Paths (qmd://)
+
+QMD uses virtual paths to reference documents across collections. The virtual path format is:
+
+```
+qmd://collection-name/relative/path/to/file.md
+```
+
+### Virtual Path Examples
+
+<CodeGroup>
+
+```bash Get Document
+qmd get qmd://notes/journal/2024-03.md
+```
+
+```bash Add Context
+qmd context add qmd://docs/api "API documentation"
+```
+
+```bash List Files
+qmd ls qmd://notes/journal
+```
+
+</CodeGroup>
+
+### Path Formats
+
+QMD accepts multiple path formats and normalizes them automatically:
+
+| Input Format | Normalized To |
+|--------------|---------------|
+| `qmd://notes/file.md` | `qmd://notes/file.md` |
+| `//notes/file.md` | `qmd://notes/file.md` |
+| `qmd:////notes/file.md` | `qmd://notes/file.md` |
+
+## Document IDs (docid)
+
+Every document has a unique **docid** — the first 6 characters of its content hash. Docids are shown in search results and can be used for quick retrieval:
+
+```bash Search results
+notes/meeting.md:15 #a1b2c3
+Title: Q4 Planning
+Score: 85%
+```
+
+```bash Get by docid
+qmd get "#a1b2c3"
+qmd get a1b2c3  # Leading # is optional
+```
+
+<Info>
+Docids are content-addressable: the same document content always produces the same docid, even across collections.
+</Info>
+
+## Managing Collections
+
+### List All Collections
+
+```bash
+qmd collection list
+```
+
+Output shows collection name, path, glob pattern, and document count:
+
+```
+notes      ~/Documents/notes     **/*.md      127 docs
+docs       ~/work/documentation  **/*.md       43 docs
+meetings   ~/meetings            **/*.txt      89 docs
+```
+
+### Rename a Collection
+
+```bash
+qmd collection rename oldname newname
+```
+
+This updates both the YAML configuration and all indexed document references.
+
+### Remove a Collection
+
+```bash
+qmd collection remove notes
+```
+
+<Warning>
+Removing a collection deletes all indexed documents and their embeddings. The source files remain untouched.
+</Warning>
+
+## Listing Collection Contents
+
+Use the `ls` command to browse collections:
+
+```bash List entire collection
+qmd ls notes
+```
+
+```bash List subdirectory
+qmd ls notes/journal
+qmd ls qmd://notes/journal
+```
+
+```bash List all collections
+qmd ls
+```
+
+## Collection Storage
+
+### Configuration Location
+
+Collections are stored in `~/.config/qmd/index.yml`:
+
+```yaml
+collections:
+  notes:
+    path: /Users/name/Documents/notes
+    pattern: "**/*.md"
+    context:
+      /journal: "Personal journal entries"
+      /work: "Work-related notes"
+  
+  docs:
+    path: /Users/name/work/docs
+    pattern: "**/*.{md,txt}"
+```
+
+### Index Database
+
+Document content and metadata are stored in SQLite:
+
+```
+~/.cache/qmd/index.sqlite
+```
+
+The database contains:
+
+- **content**: Content-addressable document storage (hash → text)
+- **documents**: File system mapping (collection + path → hash)
+- **documents_fts**: Full-text search index (BM25)
+- **content_vectors**: Vector embeddings for semantic search
+- **vectors_vec**: sqlite-vec vector index
+
+## Collection Filters
+
+All search commands support filtering by collection:
+
+```bash Search specific collection
+qmd search "API design" -c docs
+qmd vsearch "authentication" --collection notes
+qmd query "error handling" -c docs
+```
+
+```bash Multi-get from collection
+qmd multi-get "*.md" -c notes
+```
+
+## Update Hooks
+
+Collections can define an `update` command to run before indexing (e.g., pulling from git):
+
+```yaml
+collections:
+  docs:
+    path: /Users/name/work/docs
+    pattern: "**/*.md"
+    update: "git pull origin main"
+```
+
+Run updates with:
+
+```bash
+qmd update --pull
+```
+
+## Include by Default
+
+Control which collections are searched by default:
+
+```yaml
+collections:
+  archive:
+    path: /Users/name/archive
+    pattern: "**/*.md"
+    includeByDefault: false
+```
+
+Archived collections can still be searched explicitly with `-c archive`.
+
+## Best Practices
+
+<AccordionGroup>
+
+<Accordion title="Keep collections focused">
+Create separate collections for different content types (notes, docs, meetings) rather than one giant collection. This makes context management and filtering easier.
+</Accordion>
+
+<Accordion title="Use descriptive names">
+Collection names should be short but meaningful. They're used in virtual paths and CLI commands frequently.
+</Accordion>
+
+<Accordion title="Add context early">
+Define collection and path contexts before running `qmd embed`. Context is embedded with chunks and improves search quality.
+
+See [Context Management](/concepts/context) for details.
+</Accordion>
+
+<Accordion title="Customize glob patterns">
+If you need to index multiple file types or exclude certain patterns, customize the `pattern` field in `~/.config/qmd/index.yml`.
+</Accordion>
+
+</AccordionGroup>
+
+## Related
+
+- [Context Management](/concepts/context) - Add hierarchical metadata to collections
+- [Search Modes](/concepts/search-modes) - Search across collections
+- [CLI Reference](/cli/collection) - Collection management commands

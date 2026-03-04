@@ -1,0 +1,323 @@
+---
+title: Query Syntax
+description: Advanced query document format with typed sub-queries
+---
+
+QMD supports **query documents** — multi-line queries where each line specifies a search type and query text. This gives you precise control over the search pipeline.
+
+## Grammar
+
+Query documents use a simple line-based format:
+
+```ebnf
+query_document = { typed_line } ;
+typed_line     = type ":" text newline ;
+type           = "lex" | "vec" | "hyde" ;
+```
+
+## Query Types
+
+| Type | Method | Description |
+|------|--------|-------------|
+| `lex` | BM25 | Keyword search with exact matching |
+| `vec` | Vector | Semantic similarity search |
+| `hyde` | Vector | Hypothetical document embedding |
+
+### lex - Lexical Search
+
+Keyword-based search using BM25. Supports special syntax for precision:
+
+```
+lex: CAP theorem consistency
+lex: "machine learning" -"deep learning"
+lex: auth -oauth -saml
+```
+
+**Syntax:**
+
+| Pattern | Meaning | Example |
+|---------|---------|----------|
+| `word` | Prefix match | `perf` matches "performance" |
+| `"phrase"` | Exact phrase | `"rate limiter"` |
+| `-word` | Exclude term | `-sports` |
+| `-"phrase"` | Exclude phrase | `-"test data"` |
+
+<Info>
+Lex queries are the only type that supports exclusions (`-term`) and exact phrase matching (`"phrase"`).
+</Info>
+
+### vec - Semantic Search
+
+Natural language queries using vector embeddings:
+
+```
+vec: how does the rate limiter handle burst traffic
+vec: what is the tradeoff between consistency and availability
+```
+
+No special syntax — just write natural language questions or descriptions.
+
+<Warning>
+Vector queries **do not support** lex syntax. This will fail:
+
+```
+vec: authentication -oauth  # ❌ Negation not supported
+```
+
+Use `lex:` for exclusions instead.
+</Warning>
+
+### hyde - Hypothetical Document Embedding
+
+Write a hypothetical answer passage (50-100 words) representing what you expect the answer to look like:
+
+```
+hyde: The rate limiter uses a sliding window algorithm with a 60-second window. When a client exceeds 100 requests per minute, subsequent requests return 429 Too Many Requests.
+```
+
+HyDE embeddings often match better than questions because they're closer to the actual document content.
+
+## Multi-Line Query Documents
+
+Combine multiple query types for best results:
+
+```bash
+qmd query $'lex: rate limiter algorithm\nvec: how does rate limiting work in the API\nhyde: The API implements rate limiting using a token bucket algorithm with a 100 req/min limit.'
+```
+
+**How it works:**
+
+1. Each line searches independently (BM25 or vector)
+2. Results are fused using RRF (Reciprocal Rank Fusion)
+3. **First query gets 2× weight** to preserve exact matches
+4. Top candidates are reranked by LLM
+
+<Tip>
+The first query line gets double weight in RRF fusion. Put your most important query first (usually `lex:` for exact matches).
+</Tip>
+
+## Expand Queries (Default)
+
+If you don't specify query types, QMD treats input as an **expand query** and generates `lex`, `vec`, and `hyde` variants automatically:
+
+```bash
+# These are equivalent:
+qmd query "error handling best practices"
+qmd query "expand: error handling best practices"
+```
+
+The expansion model (**qmd-query-expansion-1.7B**) generates:
+- 1 lexical variant
+- 1 semantic variant  
+- (Original query gets 2× weight)
+
+<Info>
+Expansion is the default because it's simple and works well. Use explicit typed queries when you need precise control.
+</Info>
+
+## Query Document Examples
+
+### Example 1: Keyword + Semantic
+
+```bash
+qmd query $'lex: "CAP theorem"\nvec: consistency vs availability tradeoffs'
+```
+
+Finds documents with:
+- Exact phrase "CAP theorem" (lex)
+- Semantic similarity to consistency/availability concepts (vec)
+
+### Example 2: Exclusions + Question
+
+```bash
+qmd query $'lex: performance -optimization\nvec: how to improve query speed'
+```
+
+Finds documents about:
+- Performance but NOT optimization (lex exclusion)
+- Improving query speed (semantic)
+
+### Example 3: All Three Types
+
+```bash
+qmd query $'lex: authentication token\nvec: how does the auth system work\nhyde: The authentication system uses JWT tokens with a 1-hour expiry. Users authenticate via OAuth 2.0 with refresh tokens.'
+```
+
+Combines:
+- Keyword matching for "authentication token"
+- Semantic question about auth system
+- Hypothetical answer matching detailed explanations
+
+## Validation Rules
+
+### Lex Query Validation
+
+<CodeGroup>
+
+```bash Valid
+qmd query 'lex: auth -oauth'
+qmd query 'lex: "machine learning" neural'
+```
+
+```bash Invalid
+qmd query 'lex: line 1
+line 2'  # ❌ Multi-line not allowed
+
+qmd query 'lex: "unclosed quote'  # ❌ Unmatched quote
+```
+
+</CodeGroup>
+
+### Vec/Hyde Query Validation
+
+<CodeGroup>
+
+```bash Valid
+qmd query 'vec: how does authentication work'
+qmd query 'hyde: The system uses OAuth 2.0...'
+```
+
+```bash Invalid
+qmd query 'vec: auth -oauth'  # ❌ Negation not supported
+qmd query 'hyde: "exact phrase"'  # ❌ Quote syntax not supported
+```
+
+</CodeGroup>
+
+### Query Document Rules
+
+- Each typed line must use `lex:`, `vec:`, or `hyde:` prefix
+- Cannot mix `expand:` with typed lines
+- Empty lines are ignored
+- Leading/trailing whitespace is trimmed
+
+## MCP/HTTP API Format
+
+When using QMD via [MCP](/guides/mcp-server), you can pass query documents as strings:
+
+```json String Format
+{
+  "q": "lex: CAP theorem\nvec: consistency vs availability",
+  "collections": ["docs"],
+  "limit": 10
+}
+```
+
+Or structured format:
+
+```json Structured Format
+{
+  "searches": [
+    { "type": "lex", "query": "CAP theorem" },
+    { "type": "vec", "query": "consistency vs availability" }
+  ],
+  "collections": ["docs"],
+  "limit": 10
+}
+```
+
+Both formats produce identical results.
+
+## When to Use Query Documents
+
+<AccordionGroup>
+
+<Accordion title="Precise control over search strategy">
+When you want to control exactly which query types are used:
+
+```bash
+qmd query $'lex: "exact phrase"\nvec: semantic question'
+```
+</Accordion>
+
+<Accordion title="Combining keyword and semantic search">
+When you need both exact matches and conceptual similarity:
+
+```bash
+qmd query $'lex: OAuth 2.0\nvec: how does authentication work'
+```
+</Accordion>
+
+<Accordion title="Using exclusions with semantic search">
+When you need to exclude terms while still doing semantic search:
+
+```bash
+qmd query $'lex: machine learning -"deep learning"\nvec: statistical learning algorithms'
+```
+</Accordion>
+
+<Accordion title="Testing different query strategies">
+During development or tuning, explicit queries help test what works best:
+
+```bash
+qmd query 'lex: API design'
+qmd query 'vec: API design'
+qmd query $'lex: API design\nvec: API architecture patterns'
+```
+</Accordion>
+
+</AccordionGroup>
+
+## Fusion and Ranking
+
+Multi-line queries are fused using **Reciprocal Rank Fusion (RRF)**:
+
+```
+score = Σ(1 / (k + rank + 1))  where k=60
+```
+
+**Special weighting:**
+
+1. **First query gets 2× weight** to preserve exact matches
+2. **Top-rank bonus**: Documents ranking #1 get +0.05, #2-3 get +0.02
+3. **Position-aware blending** after reranking:
+   - Rank 1-3: 75% retrieval, 25% reranker
+   - Rank 4-10: 60% retrieval, 40% reranker
+   - Rank 11+: 40% retrieval, 60% reranker
+
+See [Search Modes](/concepts/search-modes#query-hybrid-search-with-reranking) for pipeline details.
+
+## Best Practices
+
+<CardGroup cols={2}>
+
+<Card title="Put lex first" icon="1">
+Place `lex:` queries first to give exact matches 2× weight:
+
+```bash
+qmd query $'lex: OAuth\nvec: authentication'
+```
+</Card>
+
+<Card title="Use lex for exclusions" icon="minus">
+Only `lex:` supports `-term` syntax:
+
+```bash
+qmd query 'lex: auth -oauth -saml'
+```
+</Card>
+
+<Card title="Keep hyde focused" icon="target">
+Write 50-100 word passages, not entire documents:
+
+```bash
+qmd query 'hyde: The rate limiter uses a token bucket algorithm...'
+```
+</Card>
+
+<Card title="Combine types strategically" icon="layer-group">
+Use lex for precision, vec for recall:
+
+```bash
+qmd query $'lex: "CAP theorem"\nvec: distributed systems consistency'
+```
+</Card>
+
+</CardGroup>
+
+## Related
+
+- [Search Modes](/concepts/search-modes) - Understanding search, vsearch, and query
+- [Embeddings](/concepts/embeddings) - How vec and hyde work
+- [MCP Server](/guides/mcp-server) - Using query syntax via MCP
+- [CLI Reference](/cli/query) - Query command documentation

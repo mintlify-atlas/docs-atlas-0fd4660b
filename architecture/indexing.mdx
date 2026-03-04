@@ -1,0 +1,322 @@
+---
+title: 'Indexing Flow'
+description: 'How QMD indexes documents and builds search indexes'
+---
+
+QMD uses a content-addressable storage model with SQLite FTS5 for full-text search and sqlite-vec for vector similarity.
+
+## SQLite Schema
+
+The index is stored in `~/.cache/qmd/index.sqlite` with the following structure:
+
+### Core Tables
+
+```sql
+-- Content-addressable storage - source of truth for document content
+CREATE TABLE content (
+  hash TEXT PRIMARY KEY,
+  doc TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+-- Document metadata - file system layer mapping virtual paths to content hashes
+CREATE TABLE documents (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  collection TEXT NOT NULL,
+  path TEXT NOT NULL,
+  title TEXT NOT NULL,
+  hash TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  modified_at TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  FOREIGN KEY (hash) REFERENCES content(hash) ON DELETE CASCADE,
+  UNIQUE(collection, path)
+);
+
+-- Vector embeddings for semantic search
+CREATE TABLE content_vectors (
+  hash TEXT NOT NULL,
+  seq INTEGER NOT NULL DEFAULT 0,
+  pos INTEGER NOT NULL DEFAULT 0,
+  model TEXT NOT NULL,
+  embedded_at TEXT NOT NULL,
+  PRIMARY KEY (hash, seq)
+);
+
+-- LLM response cache (query expansion, reranking)
+CREATE TABLE llm_cache (
+  hash TEXT PRIMARY KEY,
+  result TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+```
+
+### FTS5 Virtual Table
+
+QMD uses SQLite's FTS5 extension for full-text search with BM25 ranking:
+
+```sql
+CREATE VIRTUAL TABLE documents_fts USING fts5(
+  filepath, title, body,
+  tokenize='porter unicode61'
+);
+```
+
+The `porter` tokenizer applies Porter stemming, and `unicode61` provides Unicode-aware tokenization.
+
+### sqlite-vec Virtual Table
+
+Vector embeddings are stored in a sqlite-vec virtual table:
+
+```sql
+CREATE VIRTUAL TABLE vectors_vec USING vec0(
+  hash_seq TEXT PRIMARY KEY,
+  embedding float[768] distance_metric=cosine
+);
+```
+
+The `hash_seq` key is formatted as `{hash}_{seq}` to uniquely identify each chunk.
+
+## Indexing Pipeline
+
+### Step 1: Collection Scanning
+
+```typescript
+// Collections are defined in ~/.config/qmd/index.yml
+qmd collection add ~/Documents/notes --name notes --mask "**/*.md"
+```
+
+QMD scans the collection directory using the glob pattern and identifies all matching files.
+
+### Step 2: Content Hashing
+
+Each document's content is hashed using SHA-256:
+
+```typescript
+import { createHash } from "crypto";
+
+export async function hashContent(content: string): Promise<string> {
+  const hash = createHash("sha256");
+  hash.update(content);
+  return hash.digest("hex");
+}
+```
+
+The first 6 characters become the **docid** for quick reference:
+
+```typescript
+export function getDocid(hash: string): string {
+  return hash.slice(0, 6);
+}
+```
+
+### Step 3: Title Extraction
+
+Titles are extracted from document headers:
+
+```typescript
+const titleExtractors: Record<string, (content: string) => string | null> = {
+  '.md': (content) => {
+    const match = content.match(/^##?\s+(.+)$/m);
+    if (match) {
+      const title = (match[1] ?? "").trim();
+      if (title === "📝 Notes" || title === "Notes") {
+        const nextMatch = content.match(/^##\s+(.+)$/m);
+        if (nextMatch?.[1]) return nextMatch[1].trim();
+      }
+      return title;
+    }
+    return null;
+  },
+  '.org': (content) => {
+    const titleProp = content.match(/^#\+TITLE:\s*(.+)$/im);
+    if (titleProp?.[1]) return titleProp[1].trim();
+    const heading = content.match(/^\*+\s+(.+)$/m);
+    if (heading?.[1]) return heading[1].trim();
+    return null;
+  },
+};
+```
+
+If no title is found, the filename (without extension) is used.
+
+### Step 4: Database Insertion
+
+Content and metadata are inserted into SQLite:
+
+```typescript
+// Insert content (content-addressable, deduped by hash)
+db.prepare(`
+  INSERT OR IGNORE INTO content (hash, doc, created_at)
+  VALUES (?, ?, ?)
+`).run(hash, content, createdAt);
+
+// Insert document metadata
+db.prepare(`
+  INSERT INTO documents (collection, path, title, hash, created_at, modified_at, active)
+  VALUES (?, ?, ?, ?, ?, ?, 1)
+  ON CONFLICT(collection, path) DO UPDATE SET
+    title = excluded.title,
+    hash = excluded.hash,
+    modified_at = excluded.modified_at,
+    active = 1
+`).run(collectionName, path, title, hash, createdAt, modifiedAt);
+```
+
+### Step 5: FTS5 Triggers
+
+Automatic triggers keep the FTS5 index synchronized:
+
+```sql
+-- Insert trigger
+CREATE TRIGGER documents_ai AFTER INSERT ON documents
+WHEN new.active = 1
+BEGIN
+  INSERT INTO documents_fts(rowid, filepath, title, body)
+  SELECT
+    new.id,
+    new.collection || '/' || new.path,
+    new.title,
+    (SELECT doc FROM content WHERE hash = new.hash)
+  WHERE new.active = 1;
+END;
+
+-- Update trigger
+CREATE TRIGGER documents_au AFTER UPDATE ON documents
+BEGIN
+  DELETE FROM documents_fts WHERE rowid = old.id AND new.active = 0;
+  
+  INSERT OR REPLACE INTO documents_fts(rowid, filepath, title, body)
+  SELECT
+    new.id,
+    new.collection || '/' || new.path,
+    new.title,
+    (SELECT doc FROM content WHERE hash = new.hash)
+  WHERE new.active = 1;
+END;
+```
+
+## Embedding Generation
+
+Vector embeddings are generated separately using `qmd embed`.
+
+### Embedding Pipeline
+
+1. **Identify Documents Needing Embeddings**
+
+```sql
+SELECT d.hash, c.doc as body, MIN(d.path) as path
+FROM documents d
+JOIN content c ON d.hash = c.hash
+LEFT JOIN content_vectors v ON d.hash = v.hash AND v.seq = 0
+WHERE d.active = 1 AND v.hash IS NULL
+GROUP BY d.hash
+```
+
+2. **Chunk Documents**
+
+See [Smart Chunking](/architecture/smart-chunking) for details on the chunking algorithm.
+
+3. **Format for Embedding**
+
+```typescript
+// For documents
+export function formatDocForEmbedding(text: string, title?: string): string {
+  return `title: ${title || "none"} | text: ${text}`;
+}
+```
+
+4. **Generate Embeddings**
+
+```typescript
+const llm = getDefaultLlamaCpp();
+const formattedText = formatDocForEmbedding(chunkText, title);
+const result = await llm.embed(formattedText);
+const embedding = new Float32Array(result.embedding);
+```
+
+5. **Store Vectors**
+
+```typescript
+const hashSeq = `${hash}_${seq}`;
+
+db.prepare(`
+  INSERT OR REPLACE INTO vectors_vec (hash_seq, embedding)
+  VALUES (?, ?)
+`).run(hashSeq, embedding);
+
+db.prepare(`
+  INSERT OR REPLACE INTO content_vectors (hash, seq, pos, model, embedded_at)
+  VALUES (?, ?, ?, ?, ?)
+`).run(hash, seq, pos, model, embeddedAt);
+```
+
+## Index Maintenance
+
+### Update Flow
+
+```bash
+qmd update [--pull]
+```
+
+1. Pull latest changes (if `--pull` specified and collection is a git repo)
+2. Re-scan collection directories
+3. Mark missing documents as inactive (`active = 0`)
+4. Hash new/modified files
+5. Insert new content and update document records
+6. FTS5 triggers automatically update the full-text index
+
+### Cleanup Operations
+
+```typescript
+// Delete inactive documents
+db.prepare(`DELETE FROM documents WHERE active = 0`).run();
+
+// Remove orphaned content hashes
+db.prepare(`
+  DELETE FROM content
+  WHERE hash NOT IN (SELECT DISTINCT hash FROM documents WHERE active = 1)
+`).run();
+
+// Remove orphaned vectors
+db.exec(`
+  DELETE FROM vectors_vec WHERE hash_seq IN (
+    SELECT cv.hash || '_' || cv.seq FROM content_vectors cv
+    WHERE NOT EXISTS (
+      SELECT 1 FROM documents d WHERE d.hash = cv.hash AND d.active = 1
+    )
+  )
+`);
+
+db.exec(`
+  DELETE FROM content_vectors WHERE hash NOT IN (
+    SELECT hash FROM documents WHERE active = 1
+  )
+`);
+
+// Reclaim space
+db.exec(`VACUUM`);
+```
+
+## Configuration
+
+Collections are managed in `~/.config/qmd/index.yml`:
+
+```yaml
+collections:
+  notes:
+    path: /Users/username/Documents/notes
+    pattern: "**/*.md"
+    context:
+      "/": "Personal notes and ideas"
+      "/work": "Work-related notes"
+  docs:
+    path: /Users/username/work/docs
+    pattern: "**/*.md"
+    context:
+      "/": "Work documentation"
+
+global_context: "Knowledge base for my projects"
+```
+
+Context annotations are hierarchical and inherited by subdirectories.

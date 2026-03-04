@@ -1,0 +1,173 @@
+---
+title: MCP Overview
+description: Learn how QMD exposes search and retrieval tools via the Model Context Protocol
+---
+
+## What is MCP?
+
+QMD implements the [Model Context Protocol (MCP)](https://spec.modelcontextprotocol.io/) to expose search and document retrieval as tools that AI assistants can use directly. This allows language models to search your knowledge base and retrieve documents without manual copy-paste.
+
+## Available Tools
+
+QMD exposes six MCP tools:
+
+<CardGroup cols={2}>
+  <Card title="query" icon="magnifying-glass" href="/mcp/qmd-search">
+    Multi-strategy search with lex/vec/hyde sub-queries
+  </Card>
+  <Card title="get" icon="file" href="/mcp/qmd-get">
+    Retrieve a single document by path or docid
+  </Card>
+  <Card title="multi_get" icon="files" href="/mcp/qmd-multi-get">
+    Retrieve multiple documents by glob pattern
+  </Card>
+  <Card title="status" icon="chart-simple" href="/mcp/qmd-status">
+    Check index status and collection health
+  </Card>
+</CardGroup>
+
+## How Tools Work
+
+### Discovery via Instructions
+
+When the MCP server initializes, it sends **dynamic instructions** to the LLM in the system prompt. These instructions include:
+
+- Total document count
+- Available collections with descriptions (from context metadata)
+- Embedding status (whether vector search is available)
+- Usage tips and examples
+
+This gives the LLM immediate context about what's searchable without making a tool call.
+
+### Search Strategy
+
+The primary tool is `query`, which accepts **typed sub-queries**:
+
+- **lex** — BM25 keyword search (supports `"phrases"`, `-negation`)
+- **vec** — Semantic vector search (requires embeddings)
+- **hyde** — Hypothetical document embeddings (write what the answer looks like)
+
+Combining multiple sub-query types improves recall. The first sub-query receives 2× weight.
+
+### Document Retrieval
+
+Search results include **docids** (`#abc123`) and file paths. Use these with:
+
+- `get` — Retrieve a single document
+- `multi_get` — Retrieve by glob (e.g., `journals/2025-05*.md`) or comma-separated list
+
+Documents are returned as MCP resources with the `qmd://` URI scheme.
+
+## qmd:// Resources
+
+Documents are exposed as MCP resources with URIs like:
+
+```
+qmd://collection/path/to/file.md
+```
+
+Resources include:
+
+- **URI** — Unique identifier for the document
+- **Name** — Display name (collection/path)
+- **Title** — Document title (from frontmatter or first heading)
+- **MIME type** — `text/markdown`
+- **Text** — Full document content with optional line numbers
+- **Context** — Metadata describing the content (from `qmd context`)
+
+## Response Formats
+
+All tools return both:
+
+1. **Text content** — Human-readable summary for the LLM
+2. **Structured content** — Machine-readable JSON for parsing
+
+Example `query` response:
+
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "Found 3 results for \"error handling\":\n\n#abc123 92% src/errors.ts - Error handling utilities\n#def456 87% docs/errors.md - Error handling guide"
+    }
+  ],
+  "structuredContent": {
+    "results": [
+      {
+        "docid": "#abc123",
+        "file": "src/errors.ts",
+        "title": "Error handling utilities",
+        "score": 0.92,
+        "context": "Source code for error utilities",
+        "snippet": "1: export function handleError(err: Error) {\n2:   logger.error(err.message);\n3: }"
+      }
+    ]
+  }
+}
+```
+
+## Starting the MCP Server
+
+### Stdio Transport (Default)
+
+For Claude Desktop and other MCP clients:
+
+```bash
+qmd mcp
+```
+
+Add to your MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "qmd": {
+      "command": "qmd",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### HTTP Transport
+
+For web applications and debugging:
+
+```bash
+qmd mcp --http --port 8181
+```
+
+Runs on `http://localhost:8181/mcp` with a `/health` endpoint.
+
+See `qmd mcp --help` for daemon mode and additional options.
+
+## Relationship to CLI Commands
+
+Each MCP tool corresponds to a CLI command:
+
+| MCP Tool | CLI Command | Description |
+|----------|-------------|-------------|
+| `query` | `qmd query` | Multi-strategy search with reranking |
+| `get` | `qmd get` | Retrieve single document |
+| `multi_get` | `qmd multi-get` | Retrieve multiple documents |
+| `status` | `qmd status` | Index status |
+
+The MCP layer exposes identical functionality with structured schemas for LLM consumption.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="query Tool" icon="magnifying-glass" href="/mcp/qmd-search">
+    Learn the structured search query format
+  </Card>
+  <Card title="get Tool" icon="file" href="/mcp/qmd-get">
+    Retrieve documents by path or docid
+  </Card>
+  <Card title="MCP Specification" icon="book" href="https://spec.modelcontextprotocol.io/">
+    Read the full MCP spec
+  </Card>
+  <Card title="CLI Reference" icon="terminal" href="/cli/search">
+    Compare with CLI commands
+  </Card>
+</CardGroup>

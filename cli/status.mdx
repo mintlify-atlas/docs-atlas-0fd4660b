@@ -1,0 +1,202 @@
+---
+title: qmd status
+description: Show index health and collection statistics
+---
+
+Display comprehensive status of the QMD index, collections, embeddings, and system resources.
+
+## Usage
+
+```bash
+qmd status
+```
+
+No options or arguments.
+
+## Output Sections
+
+### Index Information
+
+```
+QMD Status
+
+Index: /home/user/.cache/qmd/index.sqlite
+Size:  42.3 MB
+MCP:   running (PID 12345)
+```
+
+Shows:
+- Index file path
+- Database size on disk
+- MCP daemon status (if running)
+
+### Documents
+
+```
+Documents
+  Total:    1,247 files indexed
+  Vectors:  1,189 embedded
+  Pending:  58 need embedding (run 'qmd embed')
+  Updated:  2h ago
+```
+
+Shows:
+- Total active documents
+- Documents with embeddings
+- Documents needing embeddings (yellow warning if >0)
+- Time since last update
+
+### Collections
+
+```
+Collections
+  notes (qmd://notes/)
+    Pattern:  **/*.md
+    Files:    423 (updated 2h ago)
+    Contexts: 3
+      /:           Personal notes and documentation
+      /meetings:   Weekly team meeting notes
+      /projects:   Active project documentation
+  
+  journals (qmd://journals/)
+    Pattern:  **/*.md
+    Files:    824 (updated 5d ago)
+    Contexts: 1
+      /:           Daily journal entries
+```
+
+For each collection:
+- Name and virtual path
+- Glob pattern
+- File count and last update time
+- Context count and preview (first 60 chars)
+
+### Examples
+
+```
+Examples
+  # List files in a collection
+  qmd ls notes
+  # Get a document
+  qmd get qmd://notes/readme.md
+  # Search within a collection
+  qmd search "query" -c notes
+```
+
+### Models
+
+```
+Models
+  Embedding:   https://huggingface.co/google/gemma-2-2b-it
+  Reranking:   https://huggingface.co/Qwen/Qwen2.5-3B-Instruct
+  Generation:  https://huggingface.co/Qwen/Qwen2.5-3B-Instruct
+```
+
+Links to Hugging Face model pages.
+
+### Device
+
+```
+Device
+  GPU:      NVIDIA GeForce RTX 3080 (offloading: yes)
+  Devices:  NVIDIA GeForce RTX 3080
+  VRAM:     8.2 GB free / 10.0 GB total
+  CPU:      8 math cores
+```
+
+Or if no GPU:
+
+```
+Device
+  GPU:      none (running on CPU — models will be slow)
+  Tip: Install CUDA, Vulkan, or Metal support for GPU acceleration.
+  CPU:      8 math cores
+```
+
+### Tips
+
+```
+Tips
+  Add context to collections for better search results: notes, journals
+    qmd context add qmd://<name>/ "What this collection contains"
+    qmd context add qmd://<name>/meeting-notes "Weekly team meeting notes"
+  Add update commands to keep collections fresh: notes, journals
+    qmd collection update-cmd <name> 'git stash && git pull --rebase --ff-only && git stash pop'
+```
+
+Context-aware tips shown when:
+- Collections missing context
+- Collections missing update commands (if more than 1 collection)
+
+## Health Warnings
+
+Status automatically checks index health:
+
+**Many documents need embedding (≥10%):**
+
+```
+Warning: 156 documents (42%) need embeddings. Run 'qmd embed' for better results.
+```
+
+**Few documents need embedding (&lt;10%):**
+
+```
+Tip: 12 documents need embeddings. Run 'qmd embed' to index them.
+```
+
+**Stale index (&gt;= 14 days):**
+
+```
+Tip: Index last updated 21 days ago. Run 'qmd update' to refresh.
+```
+
+## MCP Daemon Detection
+
+Checks `~/.cache/qmd/mcp.pid` for running daemon:
+
+- Shows PID if running
+- Silent if not running
+- Auto-cleans stale PID files
+
+## Use Cases
+
+**Quick health check:**
+```bash
+qmd status
+```
+
+**Before searching:**
+```bash
+qmd status  # Check if embeddings are current
+qmd embed   # If needed
+qmd query "search terms"
+```
+
+**After adding collection:**
+```bash
+qmd collection add ~/notes
+qmd status  # See new collection
+qmd embed   # Generate embeddings
+```
+
+**Troubleshooting:**
+```bash
+qmd status  # Check GPU, model paths, collection counts
+```
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="qmd collection list" icon="folder" href="/cli/collection#list">
+    List collections only
+  </Card>
+  <Card title="qmd embed" icon="cube" href="/cli/embed">
+    Generate embeddings
+  </Card>
+  <Card title="qmd update" icon="arrows-rotate" href="/cli/update">
+    Refresh collections
+  </Card>
+  <Card title="qmd context list" icon="message" href="/cli/context#list">
+    List all contexts
+  </Card>
+</CardGroup>

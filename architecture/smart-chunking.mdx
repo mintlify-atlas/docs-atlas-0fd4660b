@@ -1,0 +1,347 @@
+---
+title: 'Smart Chunking'
+description: 'Chunking algorithm with break point scoring and code fence protection'
+---
+
+QMD uses a smart chunking algorithm that finds natural markdown boundaries instead of cutting at hard token limits.
+
+## Overview
+
+Documents are chunked into ~900-token pieces with 15% overlap:
+
+```typescript
+export const CHUNK_SIZE_TOKENS = 900;
+export const CHUNK_OVERLAP_TOKENS = Math.floor(CHUNK_SIZE_TOKENS * 0.15);  // 135 tokens
+export const CHUNK_WINDOW_TOKENS = 200;  // Search window for finding break points
+
+// Character-based approximation (~4 chars per token)
+export const CHUNK_SIZE_CHARS = CHUNK_SIZE_TOKENS * 4;       // 3600 chars
+export const CHUNK_OVERLAP_CHARS = CHUNK_OVERLAP_TOKENS * 4; // 540 chars
+export const CHUNK_WINDOW_CHARS = CHUNK_WINDOW_TOKENS * 4;   // 800 chars
+```
+
+## Break Point Scoring
+
+### Score Table
+
+| Pattern | Score | Description |
+|---------|-------|-------------|
+| `# Heading` | 100 | H1 - major section |
+| `## Heading` | 90 | H2 - subsection |
+| `### Heading` | 80 | H3 |
+| `#### Heading` | 70 | H4 |
+| `##### Heading` | 60 | H5 |
+| `###### Heading` | 50 | H6 |
+| ` ``` ` | 80 | Code block boundary |
+| `---` / `***` | 60 | Horizontal rule |
+| Blank line | 20 | Paragraph boundary |
+| `- item` / `1. item` | 5 | List item |
+| Line break | 1 | Minimal break |
+
+### Pattern Detection
+
+```typescript
+export const BREAK_PATTERNS: [RegExp, number, string][] = [
+  [/\n#{1}(?!#)/g, 100, 'h1'],     // # but not ##
+  [/\n#{2}(?!#)/g, 90, 'h2'],      // ## but not ###
+  [/\n#{3}(?!#)/g, 80, 'h3'],      // ### but not ####
+  [/\n#{4}(?!#)/g, 70, 'h4'],      // #### but not #####
+  [/\n#{5}(?!#)/g, 60, 'h5'],      // ##### but not ######
+  [/\n#{6}(?!#)/g, 50, 'h6'],      // ######
+  [/\n```/g, 80, 'codeblock'],     // code block boundary
+  [/\n(?:---|\*\*\*|___)\s*\n/g, 60, 'hr'],  // horizontal rule
+  [/\n\n+/g, 20, 'blank'],         // paragraph boundary
+  [/\n[-*]\s/g, 5, 'list'],        // unordered list
+  [/\n\d+\.\s/g, 5, 'numlist'],    // ordered list
+  [/\n/g, 1, 'newline'],           // minimal break
+];
+```
+
+### Break Point Scanning
+
+```typescript
+export interface BreakPoint {
+  pos: number;    // character position
+  score: number;  // base score (higher = better break point)
+  type: string;   // for debugging: 'h1', 'h2', 'blank', etc.
+}
+
+export function scanBreakPoints(text: string): BreakPoint[] {
+  const points: BreakPoint[] = [];
+  const seen = new Map<number, BreakPoint>();  // pos -> best break point at that pos
+
+  for (const [pattern, score, type] of BREAK_PATTERNS) {
+    for (const match of text.matchAll(pattern)) {
+      const pos = match.index!;
+      const existing = seen.get(pos);
+      // Keep higher score if position already seen
+      if (!existing || score > existing.score) {
+        const bp = { pos, score, type };
+        seen.set(pos, bp);
+      }
+    }
+  }
+
+  // Convert to array and sort by position
+  for (const bp of seen.values()) {
+    points.push(bp);
+  }
+  return points.sort((a, b) => a.pos - b.pos);
+}
+```
+
+## Distance Decay
+
+When approaching the chunk limit, QMD searches backwards up to 200 tokens for the best break point. Closer breaks are preferred, but high-scoring breaks far back can still win:
+
+```typescript
+export function findBestCutoff(
+  breakPoints: BreakPoint[],
+  targetCharPos: number,
+  windowChars: number = CHUNK_WINDOW_CHARS,
+  decayFactor: number = 0.7,
+  codeFences: CodeFenceRegion[] = []
+): number {
+  const windowStart = targetCharPos - windowChars;
+  let bestScore = -1;
+  let bestPos = targetCharPos;
+
+  for (const bp of breakPoints) {
+    if (bp.pos < windowStart) continue;
+    if (bp.pos > targetCharPos) break;  // sorted, so we can stop
+
+    // Skip break points inside code fences
+    if (isInsideCodeFence(bp.pos, codeFences)) continue;
+
+    const distance = targetCharPos - bp.pos;
+    // Squared distance decay: gentle early, steep late
+    const normalizedDist = distance / windowChars;
+    const multiplier = 1.0 - (normalizedDist * normalizedDist) * decayFactor;
+    const finalScore = bp.score * multiplier;
+
+    if (finalScore > bestScore) {
+      bestScore = finalScore;
+      bestPos = bp.pos;
+    }
+  }
+
+  return bestPos;
+}
+```
+
+### Decay Formula
+
+The squared distance decay provides gentle early falloff and steep late falloff:
+
+```typescript
+multiplier = 1.0 - (normalizedDist² × 0.7)
+```
+
+| Distance from Target | Multiplier | Example Score (H1=100) |
+|---------------------|------------|------------------------|
+| At target (0%) | 1.00 | 100 |
+| 25% back | 0.956 | 95.6 |
+| 50% back | 0.825 | 82.5 |
+| 75% back | 0.606 | 60.6 |
+| At window edge (100% back) | 0.30 | 30.0 |
+
+### Example
+
+A heading 200 tokens back (score ~30 after decay) still beats a line break at the target (score 1), but a closer heading wins.
+
+## Code Fence Protection
+
+Code blocks are protected from splitting:
+
+```typescript
+export interface CodeFenceRegion {
+  start: number;  // position of opening ```
+  end: number;    // position of closing ``` (or document end if unclosed)
+}
+
+export function findCodeFences(text: string): CodeFenceRegion[] {
+  const regions: CodeFenceRegion[] = [];
+  const fencePattern = /\n```/g;
+  let inFence = false;
+  let fenceStart = 0;
+
+  for (const match of text.matchAll(fencePattern)) {
+    if (!inFence) {
+      fenceStart = match.index!;
+      inFence = true;
+    } else {
+      regions.push({ start: fenceStart, end: match.index! + match[0].length });
+      inFence = false;
+    }
+  }
+
+  // Handle unclosed fence - extends to end of document
+  if (inFence) {
+    regions.push({ start: fenceStart, end: text.length });
+  }
+
+  return regions;
+}
+
+export function isInsideCodeFence(pos: number, fences: CodeFenceRegion[]): boolean {
+  return fences.some(f => pos > f.start && pos < f.end);
+}
+```
+
+Break points inside code blocks are ignored. If a code block exceeds the chunk size, it's kept whole when possible.
+
+## Chunking Algorithm
+
+```typescript
+export function chunkDocument(
+  content: string,
+  maxChars: number = CHUNK_SIZE_CHARS,
+  overlapChars: number = CHUNK_OVERLAP_CHARS,
+  windowChars: number = CHUNK_WINDOW_CHARS
+): { text: string; pos: number }[] {
+  if (content.length <= maxChars) {
+    return [{ text: content, pos: 0 }];
+  }
+
+  // Pre-scan all break points and code fences once
+  const breakPoints = scanBreakPoints(content);
+  const codeFences = findCodeFences(content);
+
+  const chunks: { text: string; pos: number }[] = [];
+  let charPos = 0;
+
+  while (charPos < content.length) {
+    // Calculate target end position for this chunk
+    const targetEndPos = Math.min(charPos + maxChars, content.length);
+
+    let endPos = targetEndPos;
+
+    // If not at the end, find the best break point
+    if (endPos < content.length) {
+      const bestCutoff = findBestCutoff(
+        breakPoints,
+        targetEndPos,
+        windowChars,
+        0.7,
+        codeFences
+      );
+
+      // Only use the cutoff if it's within our current chunk
+      if (bestCutoff > charPos && bestCutoff <= targetEndPos) {
+        endPos = bestCutoff;
+      }
+    }
+
+    // Ensure we make progress
+    if (endPos <= charPos) {
+      endPos = Math.min(charPos + maxChars, content.length);
+    }
+
+    chunks.push({ text: content.slice(charPos, endPos), pos: charPos });
+
+    // Move forward, but overlap with previous chunk
+    if (endPos >= content.length) {
+      break;
+    }
+    charPos = endPos - overlapChars;
+    
+    // Prevent infinite loop - move forward at least a bit
+    const lastChunkPos = chunks.at(-1)!.pos;
+    if (charPos <= lastChunkPos) {
+      charPos = endPos;
+    }
+  }
+
+  return chunks;
+}
+```
+
+## Token-Based Chunking
+
+For precise token limits, use the async token-aware version:
+
+```typescript
+export async function chunkDocumentByTokens(
+  content: string,
+  maxTokens: number = CHUNK_SIZE_TOKENS,
+  overlapTokens: number = CHUNK_OVERLAP_TOKENS,
+  windowTokens: number = CHUNK_WINDOW_TOKENS
+): Promise<{ text: string; pos: number; tokens: number }[]> {
+  const llm = getDefaultLlamaCpp();
+
+  // Use moderate chars/token estimate (prose ~4, code ~2, mixed ~3)
+  const avgCharsPerToken = 3;
+  const maxChars = maxTokens * avgCharsPerToken;
+  const overlapChars = overlapTokens * avgCharsPerToken;
+  const windowChars = windowTokens * avgCharsPerToken;
+
+  // Chunk in character space with conservative estimate
+  let charChunks = chunkDocument(content, maxChars, overlapChars, windowChars);
+
+  // Tokenize and split any chunks that still exceed limit
+  const results: { text: string; pos: number; tokens: number }[] = [];
+
+  for (const chunk of charChunks) {
+    const tokens = await llm.tokenize(chunk.text);
+
+    if (tokens.length <= maxTokens) {
+      results.push({ text: chunk.text, pos: chunk.pos, tokens: tokens.length });
+    } else {
+      // Chunk is still too large - split it further
+      const actualCharsPerToken = chunk.text.length / tokens.length;
+      const safeMaxChars = Math.floor(maxTokens * actualCharsPerToken * 0.95);
+
+      const subChunks = chunkDocument(
+        chunk.text,
+        safeMaxChars,
+        Math.floor(overlapChars * actualCharsPerToken / 2),
+        Math.floor(windowChars * actualCharsPerToken / 2)
+      );
+
+      for (const subChunk of subChunks) {
+        const subTokens = await llm.tokenize(subChunk.text);
+        results.push({
+          text: subChunk.text,
+          pos: chunk.pos + subChunk.pos,
+          tokens: subTokens.length,
+        });
+      }
+    }
+  }
+
+  return results;
+}
+```
+
+## Example Output
+
+For a markdown document:
+
+```markdown
+# Introduction
+
+This is a sample document.
+
+## First Section
+
+Some content here.
+
+```python
+def example():
+    return "hello"
+```
+
+## Second Section
+
+More content.
+```
+
+Chunking will prefer:
+
+1. Cutting at `## First Section` (score 90)
+2. Cutting at `## Second Section` (score 90)
+3. Cutting after code block closing ` ``` ` (score 80)
+4. Not cutting inside the Python code block (protected)
+5. Overlapping by 15% (135 tokens) between chunks
+
+This keeps semantic units together and improves embedding quality.

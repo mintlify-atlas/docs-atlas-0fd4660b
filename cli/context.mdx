@@ -1,0 +1,122 @@
+---
+title: qmd context
+description: Attach human-written context to collections and paths
+---
+
+Add context (human-written summaries) to collections or specific paths to improve search quality and provide helpful metadata.
+
+## Usage
+
+```bash
+qmd context <command> [options]
+```
+
+## Subcommands
+
+### add
+
+Add context for a path or collection.
+
+```bash
+qmd context add [path] "context text"
+```
+
+<ParamField path="path" type="string">
+  Path to add context for. Can be:
+  - `/` for global context (applies to all collections)
+  - Virtual path: `qmd://collection/` or `qmd://collection/subpath`
+  - Filesystem path (auto-detects collection)
+  - Omit to use current directory
+</ParamField>
+
+<ParamField path="context text" type="string" required>
+  Human-readable description of what the path contains
+</ParamField>
+
+**Examples:**
+
+```bash
+# Add context to current directory
+qmd context add "Meeting notes from 2025"
+
+# Global context (system message for all collections)
+qmd context add / "Internal company documentation"
+
+# Context for entire collection
+qmd context add qmd://journals/ "Personal daily journal entries"
+
+# Context for subfolder
+qmd context add qmd://notes/projects "Active project documentation"
+
+# Using filesystem path
+qmd context add ~/notes/meetings "Weekly team meetings"
+```
+
+### list
+
+List all configured contexts.
+
+```bash
+qmd context list
+```
+
+Displays contexts grouped by collection, showing path and context text.
+
+### rm
+
+Remove context from a path.
+
+```bash
+qmd context rm <path>
+qmd context remove <path>  # alias
+```
+
+<ParamField path="path" type="string" required>
+  Path to remove context from (virtual path or `/` for global)
+</ParamField>
+
+**Examples:**
+
+```bash
+# Remove global context
+qmd context rm /
+
+# Remove collection context
+qmd context rm qmd://journals/2024
+
+# Remove subfolder context
+qmd context rm qmd://notes/archive
+```
+
+## How Context Works
+
+Context appears in search results and is used by:
+
+1. **Search results** — Displayed alongside matching documents
+2. **MCP tools** — Included in document metadata for AI agents
+3. **Multi-get** — Shown when retrieving multiple files
+
+Context is inherited hierarchically:
+- Path `/meetings/2025/jan.md` inherits context from `/meetings/2025`, `/meetings`, and collection root
+- Global context (`/`) applies to all collections
+
+## Storage
+
+Contexts are stored in `~/.config/qmd/index.yml` under the `context` key for each collection.
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="qmd collection" icon="folder" href="/cli/collection">
+    Manage collections
+  </Card>
+  <Card title="qmd query" icon="magnifying-glass" href="/cli/query">
+    Search with context
+  </Card>
+  <Card title="qmd status" icon="chart-line" href="/cli/status">
+    Check context coverage
+  </Card>
+  <Card title="Collections guide" icon="book" href="/guides/collection-management">
+    Learn about collections
+  </Card>
+</CardGroup>

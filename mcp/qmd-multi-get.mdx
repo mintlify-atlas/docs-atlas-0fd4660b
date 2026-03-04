@@ -1,0 +1,326 @@
+---
+title: multi_get Tool
+description: Retrieve multiple documents by glob pattern or list
+---
+
+## Overview
+
+The `multi_get` tool retrieves multiple documents in a single request using:
+
+- **Glob patterns** — `journals/2025-05*.md`, `src/**/*.ts`
+- **Comma-separated lists** — `docs/api.md, docs/errors.md, #abc123`
+
+Files larger than `maxBytes` are skipped with a message. Use `get` to retrieve them individually.
+
+## Input Schema
+
+<ParamField path="pattern" type="string" required>
+  Glob pattern or comma-separated list of file paths/docids
+  
+  **Examples:**
+  - `journals/2025-05*.md` — All May 2025 journal entries
+  - `src/**/*.ts` — All TypeScript files in src/
+  - `docs/api.md, docs/errors.md` — Specific files
+  - `#abc123, #def456` — Multiple docids
+</ParamField>
+
+<ParamField path="maxLines" type="number">
+  Maximum lines per file. Truncates long documents with a `[... truncated N more lines]` suffix.
+</ParamField>
+
+<ParamField path="maxBytes" type="number" default="10240">
+  Skip files larger than this (in bytes). Default: 10KB.
+  
+  Skipped files show a message with instructions to use `get` instead.
+</ParamField>
+
+<ParamField path="lineNumbers" type="boolean" default="false">
+  Add line numbers to output (format: `N: content`)
+</ParamField>
+
+## Response Format
+
+<ResponseField name="content" type="array">
+  Array of text messages (errors) and resource objects (documents)
+  
+  <Expandable title="Text message (errors or skipped files)">
+    <ResponseField name="type" type="string">
+      `"text"`
+    </ResponseField>
+    
+    <ResponseField name="text" type="string">
+      Error message or skip notice
+    </ResponseField>
+  </Expandable>
+  
+  <Expandable title="Resource object (document)">
+    <ResponseField name="type" type="string">
+      `"resource"`
+    </ResponseField>
+    
+    <ResponseField name="resource" type="object">
+      <Expandable title="resource details">
+        <ResponseField name="uri" type="string">
+          QMD URI (e.g., `qmd://collection/path/to/file.md`)
+        </ResponseField>
+        
+        <ResponseField name="name" type="string">
+          Display name (collection/path)
+        </ResponseField>
+        
+        <ResponseField name="title" type="string">
+          Document title from frontmatter or first heading
+        </ResponseField>
+        
+        <ResponseField name="mimeType" type="string">
+          Always `"text/markdown"`
+        </ResponseField>
+        
+        <ResponseField name="text" type="string">
+          Document content, optionally truncated, with line numbers and context
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Examples
+
+### Glob Pattern
+
+**Request:**
+```json
+{
+  "pattern": "journals/2025-05*.md"
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "resource",
+      "resource": {
+        "uri": "qmd://notes/journals/2025-05-01.md",
+        "name": "notes/journals/2025-05-01.md",
+        "title": "May 1 Journal",
+        "mimeType": "text/markdown",
+        "text": "# May 1 Journal\n\nToday I worked on..."
+      }
+    },
+    {
+      "type": "resource",
+      "resource": {
+        "uri": "qmd://notes/journals/2025-05-02.md",
+        "name": "notes/journals/2025-05-02.md",
+        "title": "May 2 Journal",
+        "mimeType": "text/markdown",
+        "text": "# May 2 Journal\n\nContinued work on..."
+      }
+    }
+  ]
+}
+```
+
+### Comma-Separated List
+
+**Request:**
+```json
+{
+  "pattern": "docs/api.md, docs/errors.md, #abc123"
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "resource",
+      "resource": {
+        "uri": "qmd://myproject/docs/api.md",
+        "name": "myproject/docs/api.md",
+        "title": "API Reference",
+        "mimeType": "text/markdown",
+        "text": "# API Reference\n\n..."
+      }
+    },
+    {
+      "type": "resource",
+      "resource": {
+        "uri": "qmd://myproject/docs/errors.md",
+        "name": "myproject/docs/errors.md",
+        "title": "Error Handling Guide",
+        "mimeType": "text/markdown",
+        "text": "# Error Handling Guide\n\n..."
+      }
+    },
+    {
+      "type": "resource",
+      "resource": {
+        "uri": "qmd://myproject/src/utils.ts",
+        "name": "myproject/src/utils.ts",
+        "title": "utils.ts",
+        "mimeType": "text/markdown",
+        "text": "export function formatDate(date: Date): string {\n  return date.toISOString();\n}"
+      }
+    }
+  ]
+}
+```
+
+### With Line Numbers
+
+**Request:**
+```json
+{
+  "pattern": "src/errors.ts",
+  "lineNumbers": true
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "resource",
+      "resource": {
+        "uri": "qmd://myproject/src/errors.ts",
+        "name": "myproject/src/errors.ts",
+        "title": "errors.ts",
+        "mimeType": "text/markdown",
+        "text": "1: export function handleError(err: Error) {\n2:   logger.error(err.message);\n3:   return { success: false, error: err.message };\n4: }\n"
+      }
+    }
+  ]
+}
+```
+
+### Truncate Long Files
+
+**Request:**
+```json
+{
+  "pattern": "docs/*.md",
+  "maxLines": 20
+}
+```
+
+Each file is truncated to 20 lines with a suffix:
+```
+[... truncated 150 more lines]
+```
+
+### Skipped Files
+
+**Request:**
+```json
+{
+  "pattern": "data/*.json",
+  "maxBytes": 5000
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "[SKIPPED: data/large.json - file too large (12345 bytes > 5000 bytes). Use 'qmd_get' with file=\"data/large.json\" to retrieve.]"
+    },
+    {
+      "type": "resource",
+      "resource": {
+        "uri": "qmd://myproject/data/small.json",
+        "name": "myproject/data/small.json",
+        "title": "small.json",
+        "mimeType": "text/markdown",
+        "text": "{\n  \"key\": \"value\"\n}\n"
+      }
+    }
+  ]
+}
+```
+
+### No Matches
+
+**Request:**
+```json
+{
+  "pattern": "nonexistent/*.md"
+}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "No files matched pattern: nonexistent/*.md"
+    }
+  ],
+  "isError": true
+}
+```
+
+## Glob Syntax
+
+Supported patterns:
+
+- `*` — Match any characters except `/`
+- `**` — Match any characters including `/` (recursive)
+- `?` — Match single character
+- `[abc]` — Match one of a, b, or c
+- `{foo,bar}` — Match foo or bar
+
+**Examples:**
+- `journals/2025*.md` — All 2025 journals
+- `src/**/*.ts` — All TypeScript files recursively
+- `docs/{api,errors}.md` — Either api.md or errors.md
+- `src/util?.ts` — util1.ts, utilA.ts, etc.
+
+## Context Metadata
+
+If you've added context with `qmd context add`, it appears as a comment:
+
+```markdown
+<!-- Context: Source code for error utilities -->
+
+export function handleError(err: Error) {
+  ...
+}
+```
+
+## CLI Equivalent
+
+```bash
+qmd multi-get "journals/2025-05*.md"
+qmd multi-get "docs/api.md, docs/errors.md"
+qmd multi-get "src/**/*.ts" -l 50 --max-bytes 20480
+```
+
+## Performance
+
+Default `maxBytes` is 10KB to prevent overwhelming the response. For large batches:
+
+- Use `maxLines` to truncate long files
+- Increase `maxBytes` if you need larger files
+- Split very large queries into multiple `multi_get` calls
+
+## Related Tools
+
+<CardGroup cols={2}>
+  <Card title="get Tool" icon="file" href="/mcp/qmd-get">
+    Retrieve a single document (no size limits)
+  </Card>
+  <Card title="query Tool" icon="magnifying-glass" href="/mcp/qmd-search">
+    Search to discover documents before retrieval
+  </Card>
+  <Card title="CLI: multi-get" icon="terminal" href="/cli/multi-get">
+    CLI command with same functionality
+  </Card>
+</CardGroup>

@@ -1,0 +1,137 @@
+---
+title: qmd get
+description: Retrieve a single document by path or docid
+---
+
+Fetch and display a single document from the index.
+
+## Usage
+
+```bash
+qmd get <file>[:line] [options]
+```
+
+<ParamField path="file" type="string" required>
+  Document identifier. Can be:
+  - Virtual path: `qmd://collection/path/file.md`
+  - Collection/path: `collection/path/file.md`
+  - Filesystem path: `/full/path/file.md` or `~/relative/path.md`
+  - Filename: `readme.md` (fuzzy match)
+  - Docid: `#abc123` or `abc123` (6-character hash)
+  - With line number: `file.md:42`
+</ParamField>
+
+## Options
+
+<ParamField path="--from" type="number">
+  Start line number (1-indexed)
+</ParamField>
+
+<ParamField path="-l" type="number">
+  Maximum number of lines to display
+</ParamField>
+
+<ParamField path="--line-numbers" type="boolean" default="false">
+  Add line numbers to output
+</ParamField>
+
+## Examples
+
+### By Virtual Path
+
+```bash
+# Full virtual path
+qmd get qmd://notes/readme.md
+
+# Collection and path
+qmd get notes/readme.md
+```
+
+### By Filesystem Path
+
+```bash
+# Absolute path
+qmd get /home/user/notes/readme.md
+
+# Home directory
+qmd get ~/notes/readme.md
+
+# Relative path (from current directory)
+qmd get ./readme.md
+```
+
+### By Filename (Fuzzy)
+
+```bash
+# Matches any file ending with "readme.md"
+qmd get readme.md
+
+# Matches any file ending with "installation.md"
+qmd get installation.md
+```
+
+### By Docid
+
+```bash
+# With # prefix
+qmd get "#abc123"
+
+# Without prefix
+qmd get abc123
+```
+
+Docids are shown in search results and `multi-get` output.
+
+### Line Ranges
+
+```bash
+# Start at line 100
+qmd get readme.md:100
+
+# Start at line 50, show 20 lines
+qmd get readme.md --from 50 -l 20
+
+# Show lines 10-30 with line numbers
+qmd get readme.md:10 -l 20 --line-numbers
+```
+
+## Output Format
+
+If the document has context metadata, it's displayed as a header:
+
+```
+Folder Context: Meeting notes from Q1 2025
+---
+
+[document content]
+```
+
+With `--line-numbers`, output is formatted like `cat -n`:
+
+```
+     1	# Readme
+     2	
+     3	This is the readme file.
+```
+
+## Path Resolution Priority
+
+1. **Docid lookup** — If input looks like a docid (#abc123)
+2. **Virtual path** — If starts with `qmd://`
+3. **Collection/path** — If first component is a known collection name
+4. **Filesystem path** — Absolute or relative path, mapped to collection
+5. **Fuzzy filename** — Match by filename suffix
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="qmd multi-get" icon="files" href="/cli/multi-get">
+    Retrieve multiple documents
+  </Card>
+  <Card title="qmd search" icon="magnifying-glass" href="/cli/search">
+    Search for documents
+  </Card>
+  <Card title="qmd ls" icon="list" href="/cli/collection#list">
+    List files in a collection
+  </Card>
+</CardGroup>

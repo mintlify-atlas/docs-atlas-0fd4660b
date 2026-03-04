@@ -1,0 +1,399 @@
+---
+title: 'Output Formats'
+description: 'Reference for all QMD output format options (--json, --csv, --md, --xml, --files)'
+---
+
+QMD supports multiple output formats for both search results and document retrieval, designed for different use cases from human reading to machine parsing.
+
+## Available Formats
+
+All formats are available for `search`, `query`, `vsearch`, and `multi-get` commands:
+
+| Flag | Format | Best For |
+|------|--------|----------|
+| `--json` | JSON | API integration, parsing, structured data |
+| `--csv` | CSV | Spreadsheets, data analysis, tabular export |
+| `--md` | Markdown | Documentation, reports, readable export |
+| `--xml` | XML | Legacy systems, RSS feeds, structured exchange |
+| `--files` | Files list | Quick reference, shell scripting |
+| (default) | CLI | Human reading in terminal |
+
+## JSON Format
+
+Structured data with all metadata included.
+
+**Usage:**
+```bash
+qmd search "authentication" --json -n 3
+qmd multi-get "docs/*.md" --json
+```
+
+**Search Output Structure:**
+```json
+[
+  {
+    "docid": "#a3f2c1",
+    "score": 0.84,
+    "file": "qmd://docs/auth.md",
+    "title": "Authentication Guide",
+    "context": "Internal security documentation",
+    "snippet": "...authentication flow uses JWT tokens..."
+  }
+]
+```
+
+**Multi-Get Output Structure:**
+```json
+[
+  {
+    "file": "qmd://docs/readme.md",
+    "title": "Project Overview",
+    "context": "Main project documentation",
+    "body": "# Project Overview\n\nThis is the main project..."
+  },
+  {
+    "file": "qmd://logs/large-file.md",
+    "title": "Large Log File",
+    "skipped": true,
+    "reason": "File too large (250KB > 10KB). Use 'qmd get qmd://logs/large-file.md' to retrieve."
+  }
+]
+```
+
+**Key Fields:**
+- `docid`: Short document ID (6-character hash prefix) - use with `qmd get #abc123`
+- `score`: Relevance score 0-1 (search only)
+- `file`: Virtual path in `qmd://collection/path` format
+- `context`: Folder context if configured (omitted if null)
+- `snippet`: Extracted relevant text (search) or `body`: Full content (multi-get)
+- `skipped`: Boolean indicating if file was too large (multi-get)
+
+## CSV Format
+
+Tabular format for spreadsheet import and data analysis.
+
+**Usage:**
+```bash
+qmd search "error handling" --csv -n 10 > results.csv
+qmd multi-get "*.md" --csv > all-docs.csv
+```
+
+**Search Output:**
+```csv
+docid,score,file,title,context,line,snippet
+#a3f2c1,0.84,qmd://docs/errors.md,Error Handling,Engineering docs,42,"Error handling uses try/catch blocks..."
+#b5d8e9,0.72,qmd://api/exceptions.md,Exception Types,API reference,18,"Custom exceptions inherit from BaseError..."
+```
+
+**Multi-Get Output:**
+```csv
+file,title,context,skipped,body
+qmd://docs/readme.md,Overview,Main docs,false,"# Overview\n\nThis document..."
+qmd://logs/big.md,Large File,,true,"File too large (50KB > 10KB)"
+```
+
+**CSV Features:**
+- Headers included in first row
+- Fields with commas/quotes/newlines are quoted per RFC 4180
+- Empty context fields show as blank (not "null")
+- Compatible with Excel, Google Sheets, pandas
+
+## Markdown Format
+
+Human-readable format suitable for documentation and reports.
+
+**Usage:**
+```bash
+qmd search "deployment" --md -n 5 > deployment-results.md
+qmd multi-get "guides/*.md" --md > combined-guides.md
+```
+
+**Search Output:**
+```markdown
+---
+# Deployment Guide
+
+**docid:** `#c7a4b2`
+**context:** Production operations
+
+Deployment happens through GitHub Actions which automatically builds
+and deploys to staging environments...
+---
+# Container Configuration
+
+**docid:** `#d9f1e3`
+**context:** Production operations
+
+Container images are built using multi-stage Dockerfiles to minimize
+the final image size...
+```
+
+**Multi-Get Output:**
+```markdown
+## qmd://guides/setup.md
+
+**Title:** Initial Setup
+
+**Context:** Getting started guides
+
+```
+# Initial Setup
+
+Follow these steps to get started:
+1. Clone the repository
+2. Install dependencies
+...
+```
+
+## qmd://guides/config.md
+
+**Title:** Configuration
+
+> File too large (45KB > 10KB). Use 'qmd get qmd://guides/config.md' to retrieve.
+```
+
+**Markdown Features:**
+- H1/H2 headings for document titles
+- Bold metadata labels
+- Code blocks for full content
+- Horizontal rules separate results (search)
+- Blockquotes for skip messages
+
+## XML Format
+
+Structured format for legacy systems and RSS-like feeds.
+
+**Usage:**
+```bash
+qmd search "api" --xml -n 5 > api-docs.xml
+qmd multi-get "changelog/*.md" --xml > changelog.xml
+```
+
+**Search Output:**
+```xml
+<file docid="#a3f2c1" name="qmd://api/rest.md" title="REST API" context="API documentation">
+The REST API provides programmatic access to all system features.
+Requests use JSON and return standard HTTP status codes...
+</file>
+
+<file docid="#b5d8e9" name="qmd://api/websocket.md" title="WebSocket API" context="API documentation">
+WebSocket connections enable real-time bidirectional communication.
+Connect to ws://api.example.com/v1/stream...
+</file>
+```
+
+**Multi-Get Output:**
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<documents>
+  <document>
+    <file>qmd://docs/readme.md</file>
+    <title>Project Overview</title>
+    <context>Main documentation</context>
+    <body># Project Overview
+
+This project provides...</body>
+  </document>
+  <document>
+    <file>qmd://logs/large.md</file>
+    <title>Large Log</title>
+    <skipped>true</skipped>
+    <reason>File too large (80KB &gt; 10KB)</reason>
+  </document>
+</documents>
+```
+
+**XML Features:**
+- Self-closing document declaration
+- Attributes for metadata (search)
+- Elements for structured data (multi-get)
+- Proper XML entity escaping (`&lt;`, `&gt;`, `&amp;`, `&quot;`, `&apos;`)
+
+## Files Format
+
+Minimal format showing just paths, scores, and context.
+
+**Usage:**
+```bash
+qmd search "config" --files -n 20
+qmd multi-get "*.md" --files
+```
+
+**Search Output:**
+```
+#a3f2c1,0.84,qmd://config/app.yml,"Application configuration files"
+#b5d8e9,0.72,qmd://config/db.yml,"Database connection settings"
+#c7a4b2,0.68,qmd://config/cache.yml,"Redis cache configuration"
+```
+
+**Multi-Get Output:**
+```
+qmd://docs/readme.md,"Main documentation"
+qmd://docs/api.md,"API reference documentation"
+qmd://logs/large.md,"Log files",[SKIPPED]
+```
+
+**Format:**
+- Search: `#docid,score,path,"context"`
+- Multi-get: `path,"context"` or `path,"context",[SKIPPED]`
+- Context quoted if present, omitted entirely if null
+- Ideal for piping to other tools: `qmd search "term" --files | cut -d, -f3`
+
+## CLI Format (Default)
+
+Colored, human-readable output for terminal use.
+
+**Usage:**
+```bash
+qmd search "authentication"  # Uses CLI format by default
+qmd multi-get "docs/*.md"
+```
+
+**Search Output:**
+```
+qmd://docs/auth.md  #a3f2c1  [0.84]
+Context: Internal security documentation
+────────────────────────────────────────────────
+...authentication flow uses JWT tokens signed
+with RS256. Tokens expire after 1 hour and must
+be refreshed using the /auth/refresh endpoint...
+
+qmd://api/oauth.md  #b5d8e9  [0.72]
+Context: API reference documentation
+────────────────────────────────────────────────
+OAuth2 implementation follows RFC 6749 with
+support for authorization code and client
+credentials grant types...
+```
+
+**Multi-Get Output:**
+```
+============================================================
+File: qmd://docs/readme.md
+============================================================
+
+Folder Context: Main project documentation
+---
+
+# Project Overview
+
+This is the main project documentation...
+
+============================================================
+File: qmd://logs/large.md
+============================================================
+
+[SKIPPED: File too large (80KB > 10KB). Use 'qmd get qmd://logs/large.md' to retrieve.]
+```
+
+**CLI Features:**
+- Syntax highlighting and colors (disabled if `NO_COLOR` env var set)
+- Visual separators between results
+- Compact score display
+- Context shown when available
+- Optimized for terminal width
+- Skip messages for large files
+
+## Format-Specific Options
+
+### Line Numbers
+
+Add line numbers to output (all formats except --files):
+
+```bash
+qmd search "error" --json --line-numbers
+qmd get readme.md --line-numbers
+```
+
+**Output (JSON example):**
+```json
+{
+  "snippet": "1: # Error Handling\n2: \n3: All errors inherit from BaseError..."
+}
+```
+
+### Full Content
+
+Show complete documents instead of snippets (search only):
+
+```bash
+qmd search "deploy" --full --md
+qmd query "authentication flow" --full --json
+```
+
+Without `--full`: Returns ~300 character snippets around matching text
+With `--full`: Returns entire document content
+
+## Default Limits by Format
+
+| Format | Default -n | Reason |
+|--------|------------|--------|
+| CLI | 5 | Terminal readability |
+| JSON | 20 | API pagination |
+| CSV | 5 | Focused results |
+| Markdown | 5 | Document length |
+| XML | 5 | Payload size |
+| Files | 20 | Compact listing |
+
+Override with `-n <number>` or `--all` (returns up to 100,000 results with `--min-score` filtering).
+
+## Common Patterns
+
+### Export to file
+```bash
+qmd search "security" --json > security-results.json
+qmd multi-get "*.md" --csv > all-docs.csv
+```
+
+### Pipe to processing tools
+```bash
+qmd search "error" --files | cut -d, -f3 | xargs qmd get
+qmd search "deploy" --json | jq '.[] | select(.score > 0.8)'
+```
+
+### Combine with grep/awk
+```bash
+qmd search "api" --csv | grep "authentication"
+qmd multi-get "*.md" --files | awk -F, '{print $1}' 
+```
+
+### Import to spreadsheet
+```bash
+qmd search "performance" --csv -n 50 > perf.csv
+# Open perf.csv in Excel/Google Sheets
+```
+
+### Generate documentation
+```bash
+qmd multi-get "docs/**/*.md" --md > combined-docs.md
+qmd search "changelog" --md --full > release-notes.md
+```
+
+## Multi-Get Size Limits
+
+By default, `multi-get` skips files larger than 10KB (10,240 bytes) to prevent overwhelming output.
+
+**Adjust the limit:**
+```bash
+qmd multi-get "*.md" --max-bytes 50000  # 50KB limit
+qmd multi-get "*.md" --max-bytes 1000000 --json  # 1MB limit
+```
+
+**Skipped file output:**
+- JSON: `{"file": "...", "skipped": true, "reason": "File too large..."}`
+- CSV: `"...",true,"File too large..."`
+- Markdown: `> File too large (80KB > 10KB). Use 'qmd get ...' to retrieve.`
+- XML: `<skipped>true</skipped><reason>...</reason>`
+- Files: `...,[SKIPPED]`
+- CLI: `[SKIPPED: File too large...]`
+
+**Retrieve skipped files:**
+```bash
+qmd get qmd://large-file.md  # No size limit on single get
+```
+
+## See Also
+
+- [Filtering Options](/cli/filtering) - Collection filters, score thresholds, result limits
+- [Search Commands](/cli/search) - Search, query, and vsearch command reference
+- [Multi-Get](/cli/multi-get) - Batch document retrieval

@@ -1,0 +1,176 @@
+---
+title: Introduction
+description: On-device hybrid search for your markdown files with BM25, vector search, and LLM reranking
+---
+
+# Introduction to QMD
+
+QMD (Query Markup Documents) is an on-device search engine for everything you need to remember. Index your markdown notes, meeting transcripts, documentation, and knowledge bases. Search with keywords or natural language—all running locally on your machine.
+
+## What is QMD?
+
+QMD combines three powerful search technologies into a single hybrid pipeline:
+
+- **BM25 full-text search** - Fast keyword matching using SQLite FTS5
+- **Vector semantic search** - Understand meaning and context with embeddings
+- **LLM re-ranking** - Intelligent result scoring for the most relevant matches
+
+All processing happens on your device using local GGUF models via node-llama-cpp. No API keys, no cloud dependencies, no data leaving your machine.
+
+<Note>
+  QMD is ideal for agentic workflows. Use the `--json` and `--files` output formats to integrate with LLMs, or connect via the Model Context Protocol (MCP) server.
+</Note>
+
+## Why Use QMD?
+
+### Privacy First
+
+Your data never leaves your machine. All indexing, embeddings, and search happen locally.
+
+### Built for AI Agents
+
+QMD exposes structured output formats and an MCP server, making it perfect for:
+
+- Giving LLMs access to your knowledge base
+- Building retrieval-augmented generation (RAG) systems
+- Integrating with Claude Desktop, Claude Code, or custom agents
+
+### Hybrid Search Quality
+
+By combining multiple search methods and using position-aware blending, QMD delivers better results than any single approach:
+
+- **Keyword search** finds exact matches and technical terms
+- **Vector search** understands semantic similarity and synonyms
+- **Re-ranking** uses LLM intelligence to score relevance
+- **Query expansion** generates alternative phrasings to catch more results
+
+### Smart Context Management
+
+Add descriptive context to collections and paths. QMD returns this context with matching documents, helping LLMs make better decisions about which content to use.
+
+```bash
+qmd context add qmd://notes "Personal notes and ideas"
+qmd context add qmd://meetings "Meeting transcripts and notes"
+qmd context add qmd://docs "Work documentation"
+```
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Multiple Search Modes" icon="magnifying-glass">
+    Choose from BM25 keyword search, vector semantic search, or full hybrid search with re-ranking.
+  </Card>
+  
+  <Card title="Collection Management" icon="folder-tree">
+    Organize documents into named collections with custom glob patterns and context.
+  </Card>
+  
+  <Card title="MCP Integration" icon="plug">
+    Connect to Claude Desktop, Claude Code, or any MCP-compatible client.
+  </Card>
+  
+  <Card title="Flexible Output" icon="code">
+    Export results as JSON, CSV, Markdown, XML, or file lists for downstream processing.
+  </Card>
+  
+  <Card title="Smart Chunking" icon="scissors">
+    Documents are chunked at natural markdown boundaries (headings, code blocks) for better retrieval.
+  </Card>
+  
+  <Card title="Document IDs" icon="hashtag">
+    Every document gets a short hash ID (docid) for quick retrieval in search results.
+  </Card>
+</CardGroup>
+
+## How It Works
+
+QMD's hybrid search pipeline combines multiple retrieval methods:
+
+1. **Query Expansion** - Generate alternative phrasings (original query weighted 2x)
+2. **Parallel Retrieval** - Each query searches both BM25 and vector indexes
+3. **RRF Fusion** - Combine results using Reciprocal Rank Fusion with top-rank bonuses
+4. **Re-ranking** - LLM scores top 30 candidates using yes/no with logprobs
+5. **Position-Aware Blending** - Preserve high-confidence matches while trusting re-ranker for lower ranks
+
+<Frame>
+  <img src="/assets/qmd-architecture.png" alt="QMD Architecture" />
+</Frame>
+
+## Search Modes
+
+<Tabs>
+  <Tab title="search">
+    **BM25 Full-Text Search**
+    
+    Fast keyword-based matching. Best for exact terms, technical identifiers, and when you know the specific words you're looking for.
+    
+    ```bash
+    qmd search "authentication flow"
+    ```
+  </Tab>
+  
+  <Tab title="vsearch">
+    **Vector Semantic Search**
+    
+    Understands meaning and context. Best for natural language queries and finding conceptually similar content.
+    
+    ```bash
+    qmd vsearch "how to login"
+    ```
+  </Tab>
+  
+  <Tab title="query">
+    **Hybrid Search (Recommended)**
+    
+    Combines BM25, vector search, query expansion, and LLM re-ranking. Best quality results for most use cases.
+    
+    ```bash
+    qmd query "user authentication"
+    ```
+  </Tab>
+</Tabs>
+
+## Score Interpretation
+
+QMD normalizes all scores to a 0.0-1.0 range for consistent interpretation:
+
+| Score Range | Meaning |
+|-------------|----------|
+| 0.8 - 1.0   | Highly relevant |
+| 0.5 - 0.8   | Moderately relevant |
+| 0.2 - 0.5   | Somewhat relevant |
+| 0.0 - 0.2   | Low relevance |
+
+<Tip>
+  Use `--min-score 0.3` with `--all` to filter results by quality threshold when returning all matches.
+</Tip>
+
+## Use Cases
+
+### Personal Knowledge Management
+
+Index your markdown notes, journals, and research. Search across everything you've written with natural language queries.
+
+### Meeting Intelligence
+
+Index meeting transcripts and notes. Quickly find when topics were discussed, decisions made, or action items assigned.
+
+### Documentation Search
+
+Make your internal documentation searchable with semantic understanding. Find relevant docs even when they don't use the exact terms in your query.
+
+### AI Agent Memory
+
+Give your AI agents access to a searchable knowledge base. Use the MCP server for tight integration or the CLI for scripted workflows.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install QMD and download the required models
+  </Card>
+  
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get your first search working in minutes
+  </Card>
+</CardGroup>

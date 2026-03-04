@@ -1,80 +1,549 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick Start
+description: Get your first QMD search working in 5 minutes
 ---
 
-## Get started in three steps
+# Quick Start
 
-Get your documentation site running locally and make your first customization.
-
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+This tutorial walks you through creating your first QMD index, adding documents, and performing searches. You'll have a working search engine for your markdown files in minutes.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  This guide assumes you've already [installed QMD](/installation). If not, install it first with `npm install -g @tobilu/qmd` or `bun install -g @tobilu/qmd`.
 </Note>
+
+## Step 1: Create Your First Collection
+
+Collections tell QMD which directories to index and what files to include.
+
+<Steps>
+  <Step title="Choose a directory">
+    Pick a directory with markdown files to index. For this example, we'll use a notes directory:
+    
+    ```bash
+    # Using a notes directory
+    qmd collection add ~/Documents/notes --name notes
+    ```
+    
+    Or index the current directory:
+    
+    ```bash
+    cd ~/Documents/notes
+    qmd collection add . --name notes
+    ```
+    
+    <Info>
+      By default, QMD indexes all `**/*.md` files (markdown files recursively). You can customize this with the `--mask` flag.
+    </Info>
+  </Step>
+  
+  <Step title="Verify the collection">
+    List all collections to confirm it was added:
+    
+    ```bash
+    qmd collection list
+    ```
+    
+    Expected output:
+    ```
+    notes
+      Path: /Users/you/Documents/notes
+      Pattern: **/*.md
+      Documents: 0
+      Updated: never
+    ```
+  </Step>
+  
+  <Step title="Index the files">
+    QMD automatically indexes files when you add a collection, but you can manually trigger indexing:
+    
+    ```bash
+    qmd update
+    ```
+    
+    This scans all collections and indexes new/changed files.
+  </Step>
+</Steps>
+
+### Add Multiple Collections
+
+Organize different types of documents into separate collections:
+
+```bash
+# Personal notes
+qmd collection add ~/Documents/notes --name notes
+
+# Meeting transcripts
+qmd collection add ~/Documents/meetings --name meetings
+
+# Work documentation
+qmd collection add ~/work/docs --name docs
+```
+
+### Custom Glob Patterns
+
+Control which files are indexed with the `--mask` flag:
+
+```bash
+# Only index files in journals/ subdirectory
+qmd collection add ~/notes --name journals --mask "journals/**/*.md"
+
+# Index both .md and .txt files
+qmd collection add ~/notes --name all-text --mask "**/*.{md,txt}"
+
+# Exclude certain directories
+qmd collection add ~/notes --name filtered --mask "**/*.md" --exclude "archive/**"
+```
+
+## Step 2: Add Context (Optional but Recommended)
+
+Context helps QMD understand your documents and returns descriptive metadata with search results. This is especially useful for AI agents.
+
+<Steps>
+  <Step title="Add collection-level context">
+    Add a description for each collection:
+    
+    ```bash
+    qmd context add qmd://notes "Personal notes and ideas"
+    qmd context add qmd://meetings "Meeting transcripts and notes"
+    qmd context add qmd://docs "Work documentation"
+    ```
+    
+    The `qmd://` prefix indicates a virtual path to a collection.
+  </Step>
+  
+  <Step title="Add path-specific context">
+    Add context for subdirectories to provide more granular information:
+    
+    ```bash
+    qmd context add qmd://notes/work "Work-related notes"
+    qmd context add qmd://notes/personal "Personal journal entries"
+    qmd context add qmd://meetings/2024 "Meeting notes from 2024"
+    ```
+  </Step>
+  
+  <Step title="Add from current directory">
+    You can also add context from within a collection directory:
+    
+    ```bash
+    cd ~/Documents/notes
+    qmd context add "Personal notes and ideas"
+    
+    cd work
+    qmd context add "Work-related notes"
+    ```
+    
+    QMD auto-detects the collection and path.
+  </Step>
+</Steps>
+
+<Tip>
+  Context is returned with search results and helps AI agents make better decisions about which documents to use. Think of it as metadata that explains what's in each part of your knowledge base.
+</Tip>
+
+## Step 3: Generate Embeddings
+
+Embeddings enable semantic search and are required for `vsearch` and `query` commands.
+
+```bash
+qmd embed
+```
+
+This command:
+1. Downloads the embedding model (~300MB) if not already cached
+2. Chunks documents into ~900-token pieces with smart boundary detection
+3. Generates embeddings for each chunk
+4. Stores vectors in the SQLite index
+
+<Info>
+  The first run downloads the `embeddinggemma-300M-Q8_0` model (~300MB). Subsequent runs use the cached model.
+</Info>
+
+### Embedding Progress
+
+QMD shows progress as it embeds documents:
+
+```
+Embedding documents...
+[████████████████████████████████] 100% | 250/250 chunks | ETA: 0s
+
+Embedded 250 chunks from 45 documents in 12.3s
+Average: 20.3 chunks/sec
+```
+
+### Re-embedding
+
+QMD automatically embeds new or changed documents. To force re-embedding everything:
+
+```bash
+qmd embed -f
+```
+
+## Step 4: Search Your Documents
+
+QMD provides three search modes. Let's try each one.
+
+<Tabs>
+  <Tab title="query (Hybrid)">
+    ### Hybrid Search (Recommended)
+    
+    Combines BM25, vector search, query expansion, and LLM re-ranking for the best results:
+    
+    ```bash
+    qmd query "project timeline"
+    ```
+    
+    **Example output:**
+    ```
+    docs/roadmap.md:15 #a1b2c3
+    Title: Q4 Roadmap
+    Context: Work documentation
+    Score: 93%
+    
+    The **project timeline** for Q4 includes three major milestones:
+    - October: Beta release
+    - November: User testing
+    - December: Production launch
+    
+    
+    meetings/planning.md:42 #d4e5f6
+    Title: Planning Session
+    Context: Meeting transcripts and notes
+    Score: 78%
+    
+    We discussed the project timeline and agreed on key dates.
+    The timeline will be reviewed weekly in standups.
+    ```
+    
+    <Info>
+      This mode downloads two additional models on first use: `qwen3-reranker-0.6b-q8_0` (~640MB) and `qmd-query-expansion-1.7B-q4_k_m` (~1.1GB).
+    </Info>
+  </Tab>
+  
+  <Tab title="search (BM25)">
+    ### Keyword Search
+    
+    Fast BM25 full-text search, perfect for exact terms:
+    
+    ```bash
+    qmd search "authentication flow"
+    ```
+    
+    **When to use:**
+    - Searching for specific technical terms
+    - Finding exact phrases
+    - Fast searches without LLM overhead
+  </Tab>
+  
+  <Tab title="vsearch (Vector)">
+    ### Semantic Search
+    
+    Vector similarity search for natural language queries:
+    
+    ```bash
+    qmd vsearch "how to login"
+    ```
+    
+    **When to use:**
+    - Natural language questions
+    - Finding conceptually similar content
+    - When you don't know exact keywords
+  </Tab>
+</Tabs>
+
+### Search Options
+
+<CodeGroup>
+```bash Number of results
+# Get 10 results instead of default 5
+qmd query "user authentication" -n 10
+```
+
+```bash Filter by collection
+# Search only in the 'docs' collection
+qmd query "API design" -c docs
+```
+
+```bash Minimum score
+# Return all matches with score >= 0.4
+qmd query "error handling" --all --min-score 0.4
+```
+
+```bash Full content
+# Show complete document content, not just snippets
+qmd query "deployment" --full
+```
+</CodeGroup>
+
+## Step 5: Retrieve Documents
+
+Once you've found relevant documents, retrieve them by path or docid.
+
+### Get by File Path
+
+```bash
+qmd get "meetings/2024-01-15.md"
+```
+
+**Fuzzy matching:** If the path doesn't exist, QMD suggests similar files:
+
+```
+Document not found: meetings/2024-01-15.md
+
+Did you mean:
+  meetings/2024-01-16.md
+  meetings/2024-01-14.md
+```
+
+### Get by Document ID
+
+Every document has a 6-character docid (shown in search results as `#abc123`):
+
+```bash
+qmd get "#a1b2c3"
+```
+
+The `#` prefix is optional:
+
+```bash
+qmd get a1b2c3
+```
+
+### Get Multiple Documents
+
+Retrieve multiple documents with glob patterns or comma-separated lists:
+
+<CodeGroup>
+```bash Glob pattern
+qmd multi-get "journals/2025-05*.md"
+```
+
+```bash Comma-separated
+qmd multi-get "doc1.md, doc2.md, #abc123"
+```
+
+```bash Limit file size
+# Skip files larger than 20KB
+qmd multi-get "docs/*.md" --max-bytes 20480
+```
+</CodeGroup>
+
+## Step 6: Output Formats for AI Agents
+
+QMD provides multiple output formats optimized for AI agents and scripting.
+
+<Tabs>
+  <Tab title="JSON">
+    ### JSON Output
+    
+    Structured data with snippets and metadata:
+    
+    ```bash
+    qmd query "authentication" --json -n 10
+    ```
+    
+    **Example output:**
+    ```json
+    [
+      {
+        "docid": "#a1b2c3",
+        "file": "docs/auth.md",
+        "title": "Authentication Guide",
+        "context": "Work documentation",
+        "score": 0.89,
+        "snippet": "The **authentication** flow uses OAuth 2.0...",
+        "line": 15
+      }
+    ]
+    ```
+  </Tab>
+  
+  <Tab title="Files">
+    ### File List Output
+    
+    CSV-like format with docid, score, filepath, and context:
+    
+    ```bash
+    qmd query "error handling" --files --min-score 0.3
+    ```
+    
+    **Example output:**
+    ```
+    #a1b2c3,0.89,docs/errors.md,Work documentation
+    #d4e5f6,0.67,notes/debugging.md,Personal notes and ideas
+    #g7h8i9,0.45,meetings/incident.md,Meeting transcripts
+    ```
+    
+    Perfect for piping to other commands:
+    ```bash
+    qmd query "API" --files | cut -d, -f3 | xargs -I {} cat {}
+    ```
+  </Tab>
+  
+  <Tab title="Markdown">
+    ### Markdown Output
+    
+    Formatted markdown for LLM context:
+    
+    ```bash
+    qmd search "deployment" --md --full
+    ```
+    
+    **Example output:**
+    ```markdown
+    ## docs/deploy.md
+    
+    ### Deployment Guide
+    
+    The deployment process consists of three stages...
+    ```
+  </Tab>
+</Tabs>
+
+## Step 7: Check Index Status
+
+View index statistics and health:
+
+```bash
+qmd status
+```
+
+**Example output:**
+```
+Index: /Users/you/.cache/qmd/index.sqlite (45.2 MB)
+Documents: 156 (142 active, 14 inactive)
+Collections: 3
+
+Collections:
+  notes (85 docs) - /Users/you/Documents/notes
+    Context: Personal notes and ideas
+  meetings (42 docs) - /Users/you/Documents/meetings
+    Context: Meeting transcripts and notes
+  docs (29 docs) - /Users/you/work/docs
+    Context: Work documentation
+
+Embeddings: 1,234 chunks (100%)
+Cache: 45 query expansions, 128 rerank scores
+```
+
+## Common Workflows
+
+### Daily Update
+
+Update the index with new/changed files:
+
+```bash
+qmd update
+```
+
+For git repositories, pull latest changes first:
+
+```bash
+qmd update --pull
+```
+
+### Search and Open
+
+Find a document and open it in your editor:
+
+```bash
+# Search and get the file path
+FILE=$(qmd search "deployment" --files -n 1 | cut -d, -f3)
+
+# Open in your editor
+code "$FILE"
+# or
+vim "$FILE"
+```
+
+### Export for LLM Context
+
+Get all relevant documents above a score threshold:
+
+```bash
+qmd query "API design patterns" --all --min-score 0.4 --md --full > context.md
+```
+
+Then use `context.md` as context for your LLM.
+
+### Collection Management
+
+<CodeGroup>
+```bash List files
+# List all files in a collection
+qmd ls notes
+
+# List files in a subdirectory
+qmd ls notes/work
+```
+
+```bash Remove collection
+qmd collection remove notes
+```
+
+```bash Rename collection
+qmd collection rename notes my-notes
+```
+</CodeGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="MCP Integration" icon="plug" href="/guides/mcp-server">
+    Connect QMD to Claude Desktop, Claude Code, or custom MCP clients
+  </Card>
+  
+  <Card title="Search Modes" icon="magnifying-glass" href="/concepts/search-modes">
+    Learn about BM25, vector search, and hybrid query modes
+  </Card>
+  
+  <Card title="Collection Management" icon="folder-tree" href="/concepts/collections">
+    Advanced collection configuration and context management
+  </Card>
+  
+  <Card title="CLI Reference" icon="terminal" href="/cli/collection">
+    Complete command-line reference with all options and flags
+  </Card>
+</CardGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="No search results">
+    **Possible causes:**
+    
+    1. **Collection not indexed:** Run `qmd update` to index files
+    2. **Files not matched by glob:** Check collection pattern with `qmd collection list`
+    3. **Score too low:** Try lowering `--min-score` or increase `-n`
+    4. **Embeddings missing:** Run `qmd embed` for vector/hybrid search
+  </Accordion>
+  
+  <Accordion title="Search is slow">
+    **Solutions:**
+    
+    1. Use `search` (BM25 only) instead of `query` for faster results
+    2. Filter by collection with `-c <name>` to reduce search space
+    3. Reduce number of results with `-n <num>`
+    4. Check index health with `qmd status` and clean up with `qmd cleanup`
+  </Accordion>
+  
+  <Accordion title="Embeddings fail">
+    **Error:** `Failed to load embedding model`
+    
+    **Solutions:**
+    
+    1. Check internet connection (models download from HuggingFace)
+    2. Verify sufficient disk space (~300MB for embedding model)
+    3. Try manual download (see [Installation](/installation#manual-model-download))
+    4. Check `~/.cache/qmd/models/` for corrupted downloads
+  </Accordion>
+  
+  <Accordion title="Collection path not found">
+    **Error:** `Collection path does not exist`
+    
+    **Solutions:**
+    
+    1. Use absolute paths: `qmd collection add ~/Documents/notes --name notes`
+    2. Verify the directory exists: `ls ~/Documents/notes`
+    3. Check for typos in the path
+  </Accordion>
+</AccordionGroup>

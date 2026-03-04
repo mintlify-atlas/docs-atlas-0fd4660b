@@ -1,0 +1,418 @@
+---
+title: Document Retrieval
+description: Using get/multi-get, docids, and glob patterns to retrieve documents
+---
+
+QMD provides powerful document retrieval commands that work with paths, docids, and glob patterns.
+
+## Single Document Retrieval
+
+### Get by Path
+
+Retrieve a document using its path (relative to collection):
+
+<CodeGroup>
+```bash Relative Path
+qmd get notes/meeting.md
+```
+
+```bash Virtual Path
+qmd get qmd://notes/meeting.md
+```
+
+```bash Filesystem Path
+qmd get ~/Documents/notes/meeting.md
+```
+</CodeGroup>
+
+### Get by Docid
+
+Every document has a unique short identifier (docid) - the first 6 characters of its content hash. Docids appear in search results:
+
+```bash
+qmd search "authentication"
+```
+
+**Output shows docids:**
+```
+docs/auth-guide.md:42 #a1b2c3
+Title: Authentication Guide
+Score: 93%
+...
+```
+
+Retrieve using docid:
+
+<CodeGroup>
+```bash With Hash Prefix
+qmd get "#a1b2c3"
+```
+
+```bash Without Prefix
+qmd get a1b2c3
+```
+</CodeGroup>
+
+<Note>
+Docids are stable as long as the document content doesn't change. If content changes, a new hash (and docid) is generated.
+</Note>
+
+### Start at Specific Line
+
+Retrieve from a specific line number:
+
+<CodeGroup>
+```bash Colon Syntax
+qmd get notes/meeting.md:50
+```
+
+```bash Flag Syntax
+qmd get notes/meeting.md --from 50
+```
+</CodeGroup>
+
+Limit the number of lines returned:
+
+```bash
+# Get 100 lines starting from line 50
+qmd get notes/meeting.md:50 -l 100
+```
+
+### Add Line Numbers
+
+```bash
+qmd get notes/meeting.md --line-numbers
+```
+
+**Output:**
+```
+1: # Meeting Notes - 2025-01-15
+2: 
+3: ## Attendees
+4: - Alice, Bob, Carol
+5: 
+6: ## Topics
+...
+```
+
+## Fuzzy Matching
+
+QMD suggests similar files if exact match fails:
+
+```bash
+qmd get meetting.md
+```
+
+**Output:**
+```
+Document not found: meetting.md
+
+Did you mean one of these?
+  - notes/meeting.md
+  - notes/meeting-2025-01-14.md
+  - work/team-meeting.md
+```
+
+## Multiple Document Retrieval
+
+### Multi-Get by Glob Pattern
+
+Retrieve multiple documents matching a pattern:
+
+<CodeGroup>
+```bash All January Meetings
+qmd multi-get "meetings/2025-01-*.md"
+```
+
+```bash All Documentation
+qmd multi-get "docs/**/*.md"
+```
+
+```bash Specific Subdirectory
+qmd multi-get "journals/2025/*.md"
+```
+</CodeGroup>
+
+**Example output:**
+
+```
+============================================================
+File: meetings/2025-01-10.md
+============================================================
+
+# Team Standup - Jan 10
+
+## Updates
+...
+
+============================================================
+File: meetings/2025-01-15.md
+============================================================
+
+# Weekly Sync - Jan 15
+
+## Action Items
+...
+```
+
+### Multi-Get by Comma-Separated List
+
+Retrieve specific files (supports docids):
+
+```bash
+qmd multi-get "doc1.md, doc2.md, #abc123"
+```
+
+### Size Limits
+
+By default, `multi-get` skips files larger than 10KB. Adjust with `--max-bytes`:
+
+<CodeGroup>
+```bash 20KB Limit
+qmd multi-get "docs/*.md" --max-bytes 20480
+```
+
+```bash No Limit
+qmd multi-get "docs/*.md" --max-bytes 999999999
+```
+</CodeGroup>
+
+Skipped files show a message:
+
+```
+[SKIPPED: File too large (45KB > 10KB). Use 'qmd get docs/large-file.md' to retrieve.]
+```
+
+### Line Limits
+
+Limit lines per file:
+
+```bash
+qmd multi-get "journals/2025-*.md" -l 50
+```
+
+Truncated files show:
+
+```
+...
+
+[... truncated 127 more lines]
+```
+
+## Output Formats
+
+`multi-get` supports the same formats as search:
+
+<Tabs>
+  <Tab title="CLI (default)">
+    ```bash
+    qmd multi-get "notes/2025-01-*.md"
+    ```
+
+    Displays each file with headers and separators.
+  </Tab>
+
+  <Tab title="JSON">
+    ```bash
+    qmd multi-get --json "journals/2025-05*.md"
+    ```
+
+    ```json
+    [
+      {
+        "file": "journals/2025-05-01.md",
+        "title": "Daily Journal - May 1",
+        "context": "Personal journals",
+        "body": "# May 1, 2025\n\nToday I..."
+      },
+      {
+        "file": "journals/large-file.md",
+        "title": "Archive",
+        "skipped": true,
+        "reason": "File too large (45KB > 10KB)"
+      }
+    ]
+    ```
+  </Tab>
+
+  <Tab title="CSV">
+    ```bash
+    qmd multi-get --csv "docs/*.md" > documents.csv
+    ```
+
+    ```csv
+    file,title,context,skipped,body
+    docs/api.md,API Guide,Work documentation,false,"# API Guide..."
+    ```
+  </Tab>
+
+  <Tab title="Markdown">
+    ```bash
+    qmd multi-get --md "notes/*.md" > combined.md
+    ```
+
+    ```markdown
+    ## notes/meeting.md
+
+    **Title:** Team Meeting
+
+    **Context:** Work notes
+
+    \`\`\`
+    # Meeting Notes
+    ...
+    \`\`\`
+    ```
+  </Tab>
+
+  <Tab title="XML">
+    ```bash
+    qmd multi-get --xml "docs/*.md"
+    ```
+
+    ```xml
+    <?xml version="1.0" encoding="UTF-8"?>
+    <documents>
+      <document>
+        <file>docs/api.md</file>
+        <title>API Guide</title>
+        <context>Work documentation</context>
+        <body># API Guide...</body>
+      </document>
+    </documents>
+    ```
+  </Tab>
+
+  <Tab title="Files List">
+    ```bash
+    qmd multi-get --files "notes/*.md"
+    ```
+
+    ```
+    notes/meeting.md,"Work notes"
+    notes/ideas.md,"Personal notes"
+    notes/large.md,"Personal notes",[SKIPPED]
+    ```
+  </Tab>
+</Tabs>
+
+## Context in Retrieved Documents
+
+Retrieved documents include context metadata when configured:
+
+```bash
+qmd get notes/work/meeting.md
+```
+
+**Output:**
+```
+Folder Context: Work-related notes
+---
+
+# Team Meeting - Jan 15
+
+## Attendees
+...
+```
+
+See [Context Management](/concepts/context) for details on adding context.
+
+## Use Cases
+
+### Export LLM Context
+
+Gather all relevant documents for an AI agent:
+
+```bash
+qmd search --files --all --min-score 0.4 "authentication" > files.txt
+cat files.txt | cut -d, -f1 | xargs -I {} qmd get {} > context.md
+```
+
+Or use multi-get directly:
+
+```bash
+qmd multi-get "docs/auth-*.md" --md --full > llm-context.md
+```
+
+### Batch Processing
+
+Process multiple documents with a script:
+
+```bash
+qmd multi-get --json "journals/2025-*.md" | jq -r '.[] | .file + ": " + .title'
+```
+
+### Archive to Single File
+
+Combine all documents in a directory:
+
+```bash
+qmd multi-get "notes/2024/**/*.md" --md > archive-2024.md
+```
+
+### Selective Retrieval
+
+Get only small files for quick processing:
+
+```bash
+qmd multi-get "docs/*.md" --max-bytes 5120 --json
+```
+
+## Working with Docids
+
+### In Search Results
+
+Docids appear in all search output formats:
+
+<CodeGroup>
+```bash CLI
+qmd search "API"
+# docs/api.md:10 #a1b2c3
+```
+
+```bash JSON
+qmd search --json "API" | jq '.[].docid'
+# "#a1b2c3"
+```
+
+```bash CSV
+qmd search --csv "API" | cut -d, -f1
+# #a1b2c3
+```
+</CodeGroup>
+
+### In Multi-Get
+
+Mix docids with paths:
+
+```bash
+qmd multi-get "#a1b2c3, notes/meeting.md, #def456"
+```
+
+### Stability
+
+Docids are content-based:
+
+- **Unchanged content** = same docid across re-indexes
+- **Modified content** = new docid (old one becomes invalid)
+- **Moved files** = same docid (based on content, not path)
+
+## Performance Tips
+
+<CardGroup cols={2}>
+  <Card title="Use Glob Patterns" icon="asterisk">
+    `multi-get` with globs is faster than individual `get` calls in a loop.
+  </Card>
+
+  <Card title="Set Size Limits" icon="gauge-high">
+    Use `--max-bytes` to skip large files when you only need metadata or summaries.
+  </Card>
+
+  <Card title="Limit Lines" icon="ruler">
+    `-l 100` retrieves only the first 100 lines, reducing I/O for large documents.
+  </Card>
+
+  <Card title="Use Docids for Stability" icon="hashtag">
+    Docids work even if files are moved or renamed (as long as content is unchanged).
+  </Card>
+</CardGroup>

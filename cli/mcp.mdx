@@ -1,0 +1,272 @@
+---
+title: qmd mcp
+description: Start the Model Context Protocol server for AI agents
+---
+
+Start the MCP (Model Context Protocol) server to expose QMD's search and retrieval capabilities to AI agents and IDEs.
+
+## Usage
+
+```bash
+# Stdio transport (default, for Claude Desktop/Cline/etc)
+qmd mcp
+
+# HTTP transport (advanced)
+qmd mcp --http [--port PORT]
+
+# Background daemon (HTTP only)
+qmd mcp --http --daemon [--port PORT]
+
+# Stop daemon
+qmd mcp stop
+```
+
+## Transport Modes
+
+### Stdio (default)
+
+Communicates via stdin/stdout. Used by:
+
+- **Claude Desktop** — Configure in `claude_desktop_config.json`
+- **Cline** — Add to MCP servers list
+- **Other MCP clients** — Any client supporting stdio transport
+
+```bash
+qmd mcp
+```
+
+Runs in foreground, logs to stderr. Stop with Ctrl+C.
+
+### HTTP
+
+Exposes MCP over HTTP/SSE. Useful for:
+
+- Web-based clients
+- Custom integrations
+- Remote access
+
+```bash
+# Start on default port 8181
+qmd mcp --http
+
+# Custom port
+qmd mcp --http --port 9000
+```
+
+Runs in foreground. Access at `http://localhost:8181/mcp`
+
+### HTTP Daemon
+
+Runs HTTP server in background:
+
+```bash
+# Start daemon
+qmd mcp --http --daemon
+# Started on http://localhost:8181/mcp (PID 12345)
+# Logs: /home/user/.cache/qmd/mcp.log
+
+# Stop daemon
+qmd mcp stop
+# Stopped QMD MCP server (PID 12345).
+```
+
+Logs written to `~/.cache/qmd/mcp.log`
+PID stored in `~/.cache/qmd/mcp.pid`
+
+## Options
+
+<ParamField path="--http" type="boolean" default="false">
+  Use HTTP transport instead of stdio
+</ParamField>
+
+<ParamField path="--daemon" type="boolean" default="false">
+  Run as background daemon (requires `--http`)
+</ParamField>
+
+<ParamField path="--port" type="number" default="8181">
+  HTTP port (requires `--http`)
+</ParamField>
+
+## MCP Tools Provided
+
+The server exposes these tools to AI agents:
+
+### search
+
+Hybrid search with BM25 + vector + reranking.
+
+**Parameters:**
+- `query` (string, required) — Search query
+- `collection` (string) — Filter by collection
+- `limit` (number, default: 10) — Max results
+- `minScore` (number, default: 0) — Min score threshold
+
+### vector_search
+
+Vector semantic search only.
+
+**Parameters:**
+- `query` (string, required) — Search query
+- `collection` (string) — Filter by collection
+- `limit` (number, default: 10) — Max results
+- `minScore` (number, default: 0.3) — Min similarity threshold
+
+### list_collections
+
+List all indexed collections.
+
+**Parameters:** None
+
+### get_document
+
+Retrieve single document by path or docid.
+
+**Parameters:**
+- `path` (string, required) — Virtual path, filesystem path, or docid
+
+### multi_get
+
+Batch retrieve multiple documents.
+
+**Parameters:**
+- `pattern` (string, required) — Glob pattern or comma-separated list
+- `maxBytes` (number, default: 10240) — Skip files larger than this
+
+### list_files
+
+List files in a collection.
+
+**Parameters:**
+- `collection` (string) — Collection name (omit to list collections)
+- `path` (string) — Path prefix to filter by
+
+## Configuration
+
+### Claude Desktop
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+```json
+{
+  "mcpServers": {
+    "qmd": {
+      "command": "qmd",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop.
+
+### Cline (VS Code)
+
+Add to MCP servers configuration:
+
+```json
+{
+  "qmd": {
+    "command": "qmd",
+    "args": ["mcp"]
+  }
+}
+```
+
+### Custom HTTP Client
+
+```bash
+# Start server
+qmd mcp --http --port 8181
+
+# Connect to http://localhost:8181/mcp
+# Use SSE for events, POST for requests
+```
+
+## Daemon Management
+
+```bash
+# Start daemon
+qmd mcp --http --daemon
+
+# Check if running
+qmd status  # Shows "MCP: running (PID 12345)"
+
+# View logs
+tail -f ~/.cache/qmd/mcp.log
+
+# Stop daemon
+qmd mcp stop
+```
+
+Daemon:
+- Auto-restarts if parent process dies (detached)
+- Writes logs to `~/.cache/qmd/mcp.log` (truncated on each start)
+- Stores PID in `~/.cache/qmd/mcp.pid`
+- Cleaned up automatically if process dies
+
+## Error Handling
+
+**Port already in use:**
+
+```
+Port 8181 already in use. Try a different port with --port.
+```
+
+Use `--port` to specify different port.
+
+**Daemon already running:**
+
+```
+Already running (PID 12345). Run 'qmd mcp stop' first.
+```
+
+Stop existing daemon before starting new one.
+
+**Stale PID file:**
+
+Auto-cleaned silently if process not running.
+
+## Examples
+
+```bash
+# Standard stdio for Claude Desktop
+qmd mcp
+
+# HTTP for web clients
+qmd mcp --http
+
+# Background daemon on custom port
+qmd mcp --http --daemon --port 9000
+
+# Stop daemon
+qmd mcp stop
+
+# Check daemon status
+qmd status
+```
+
+## Security Notes
+
+- **Stdio:** Secure (direct process communication)
+- **HTTP:** No authentication — bind to localhost only
+- **Daemon:** Accessible to all local processes on the port
+
+For remote access, use SSH tunneling:
+
+```bash
+ssh -L 8181:localhost:8181 remote-host
+```
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="qmd status" icon="chart-line" href="/cli/status">
+    Check if MCP daemon is running
+  </Card>
+  <Card title="MCP integration guide" icon="book" href="/guides/mcp-server">
+    Set up MCP with AI agents
+  </Card>
+  <Card title="qmd query" icon="sparkles" href="/cli/query">
+    Test search before exposing via MCP
+  </Card>
+</CardGroup>

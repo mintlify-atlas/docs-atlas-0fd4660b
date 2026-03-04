@@ -1,0 +1,372 @@
+---
+title: 'Score Fusion & Normalization'
+description: 'Score normalization, RRF fusion, and position-aware blending'
+---
+
+QMD combines scores from multiple search backends using Reciprocal Rank Fusion (RRF) and position-aware blending.
+
+## Score Normalization
+
+Different search backends produce scores in different ranges. QMD normalizes all scores to [0, 1] for consistency.
+
+### BM25 (FTS5) Normalization
+
+FTS5 BM25 scores are negative (lower = better match):
+
+```typescript
+// Raw BM25 score: -10 (strong), -2 (weak), 0 (no match)
+const bm25_score = row.bm25_score;  // e.g., -10
+
+// Normalize to [0, 1] where higher = better
+const score = Math.abs(bm25_score) / (1 + Math.abs(bm25_score));
+```
+
+| Raw BM25 | Normalized | Interpretation |
+|----------|------------|----------------|
+| -10 | 0.91 | Strong match |
+| -5 | 0.83 | Good match |
+| -2 | 0.67 | Medium match |
+| -0.5 | 0.33 | Weak match |
+| 0 | 0.00 | No match |
+
+This transformation is:
+- **Monotonic**: Preserves ranking order
+- **Query-independent**: No per-query normalization needed
+- **Stable**: Same raw score → same normalized score
+
+### Vector (Cosine) Normalization
+
+Vector search returns cosine distance (0 = identical, 1 = orthogonal):
+
+```typescript
+const distance = vecResult.distance;  // e.g., 0.3
+
+// Convert distance to similarity [0, 1] where higher = better
+const score = 1 - distance;
+```
+
+| Cosine Distance | Normalized | Interpretation |
+|----------------|------------|----------------|
+| 0.0 | 1.00 | Identical |
+| 0.1 | 0.90 | Very similar |
+| 0.3 | 0.70 | Similar |
+| 0.5 | 0.50 | Somewhat similar |
+| 0.7 | 0.30 | Different |
+| 1.0 | 0.00 | Orthogonal |
+
+### Reranker Normalization
+
+Qwen3-Reranker returns scores already in [0, 1] range:
+
+```typescript
+const rerankScore = result.score;  // Already 0.0 to 1.0
+```
+
+No normalization needed.
+
+## Reciprocal Rank Fusion (RRF)
+
+### Formula
+
+For each document appearing in multiple ranked lists:
+
+```
+RRF_score = Σ (weight_i / (k + rank_i + 1))
+```
+
+Where:
+- `weight_i` = weight for list `i` (default 1.0, original query gets 2.0)
+- `k` = constant (60, from RRF literature)
+- `rank_i` = 0-based rank in list `i`
+
+### Implementation
+
+```typescript
+export function reciprocalRankFusion(
+  resultLists: RankedResult[][],
+  weights: number[] = [],
+  k: number = 60
+): RankedResult[] {
+  const scores = new Map<string, { result: RankedResult; rrfScore: number; topRank: number }>();
+
+  for (let listIdx = 0; listIdx < resultLists.length; listIdx++) {
+    const list = resultLists[listIdx];
+    const weight = weights[listIdx] ?? 1.0;
+
+    for (let rank = 0; rank < list.length; rank++) {
+      const result = list[rank];
+      const rrfContribution = weight / (k + rank + 1);
+      const existing = scores.get(result.file);
+
+      if (existing) {
+        existing.rrfScore += rrfContribution;
+        existing.topRank = Math.min(existing.topRank, rank);
+      } else {
+        scores.set(result.file, {
+          result,
+          rrfScore: rrfContribution,
+          topRank: rank,
+        });
+      }
+    }
+  }
+
+  // Top-rank bonus
+  for (const entry of scores.values()) {
+    if (entry.topRank === 0) {
+      entry.rrfScore += 0.05;  // #1 rank bonus
+    } else if (entry.topRank <= 2) {
+      entry.rrfScore += 0.02;  // #2-3 rank bonus
+    }
+  }
+
+  return Array.from(scores.values())
+    .sort((a, b) => b.rrfScore - a.rrfScore)
+    .map(e => ({ ...e.result, score: e.rrfScore }));
+}
+```
+
+### Top-Rank Bonus
+
+Documents ranking #1 in any list get a +0.05 bonus, #2-3 get +0.02:
+
+```typescript
+if (entry.topRank === 0) {
+  entry.rrfScore += 0.05;  // Rank #1 bonus
+} else if (entry.topRank <= 2) {
+  entry.rrfScore += 0.02;  // Rank #2-3 bonus
+}
+```
+
+This preserves exact matches that might get diluted by expanded queries.
+
+### Weight Configuration
+
+Original query results get 2× weight:
+
+```typescript
+// First 2 lists (original FTS + original vector) get 2x weight
+const weights = rankedLists.map((_, i) => i < 2 ? 2.0 : 1.0);
+```
+
+| List | Weight | Rationale |
+|------|--------|----------|
+| Original query FTS | 2.0 | Preserve exact keyword matches |
+| Original query vector | 2.0 | Preserve semantic intent |
+| Expanded query 1 | 1.0 | Supporting evidence |
+| Expanded query 2 | 1.0 | Supporting evidence |
+
+### Example Calculation
+
+Document appears in 3 lists:
+
+```
+List 0 (original FTS, weight=2.0): rank 0
+List 1 (original vec, weight=2.0): rank 5
+List 2 (expanded lex, weight=1.0): rank 2
+
+RRF_score = (2.0 / (60 + 0 + 1)) + (2.0 / (60 + 5 + 1)) + (1.0 / (60 + 2 + 1))
+          = (2.0 / 61) + (2.0 / 66) + (1.0 / 63)
+          = 0.0328 + 0.0303 + 0.0159
+          = 0.0790
+
+# Top-rank bonus (rank 0 in list 0)
+RRF_score += 0.05
+Final RRF_score = 0.1290
+```
+
+## Position-Aware Blending
+
+### Motivation
+
+Pure reranker scores can contradict high-confidence retrieval results. For example:
+
+- BM25 finds an exact keyword match (rank 1)
+- Reranker gives it a low score (0.3) because it lacks semantic context
+- Result gets buried despite being the user's intent
+
+Position-aware blending trusts retrieval for top ranks and gradually increases reranker influence for lower ranks.
+
+### Algorithm
+
+```typescript
+const blended = reranked.map(r => {
+  const rrfRank = rrfRankMap.get(r.file) || candidateLimit;
+  
+  // Position-aware weights
+  let rrfWeight: number;
+  if (rrfRank <= 3) {
+    rrfWeight = 0.75;      // Trust retrieval
+  } else if (rrfRank <= 10) {
+    rrfWeight = 0.60;      // Balanced
+  } else {
+    rrfWeight = 0.40;      // Trust reranker
+  }
+  
+  // Convert rank to score (inverse rank)
+  const rrfScore = 1 / rrfRank;
+  
+  // Blend retrieval and reranker scores
+  const blendedScore = rrfWeight * rrfScore + (1 - rrfWeight) * r.score;
+  
+  return { ...r, score: blendedScore };
+}).sort((a, b) => b.score - a.score);
+```
+
+### Weight Table
+
+| RRF Rank | RRF Weight | Reranker Weight | Rationale |
+|----------|------------|-----------------|----------|
+| 1-3 | 75% | 25% | Preserve exact matches |
+| 4-10 | 60% | 40% | Balanced trust |
+| 11+ | 40% | 60% | Trust reranker for semantic matches |
+
+### Example 1: Top Rank Preserved
+
+Document at RRF rank 2:
+
+```
+rrfScore = 1 / 2 = 0.50
+rerankScore = 0.30  // Reranker disagrees
+rrfWeight = 0.75    // Rank 2 → trust retrieval
+
+blendedScore = 0.75 × 0.50 + 0.25 × 0.30
+             = 0.375 + 0.075
+             = 0.45  ✓ Preserved despite reranker disagreement
+```
+
+### Example 2: Reranker Promotes
+
+Document at RRF rank 15:
+
+```
+rrfScore = 1 / 15 = 0.067
+rerankScore = 0.85  // Reranker strongly agrees
+rrfWeight = 0.40    // Rank 15 → trust reranker
+
+blendedScore = 0.40 × 0.067 + 0.60 × 0.85
+             = 0.027 + 0.51
+             = 0.537  ✓ Reranker elevated this result
+```
+
+### Example 3: Middle Ground
+
+Document at RRF rank 7:
+
+```
+rrfScore = 1 / 7 = 0.143
+rerankScore = 0.65
+rrfWeight = 0.60    // Rank 7 → balanced
+
+blendedScore = 0.60 × 0.143 + 0.40 × 0.65
+             = 0.086 + 0.260
+             = 0.346  ✓ Balanced contribution
+```
+
+## Full Pipeline Example
+
+User query: `"machine learning algorithms"`
+
+### Step 1: Query Expansion
+
+```
+Original: "machine learning algorithms"
+Expanded:
+  lex: "ML classification regression"
+  vec: "artificial intelligence models"
+  hyde: "A guide explaining neural networks and deep learning"
+```
+
+### Step 2: Multi-Backend Search
+
+```
+List 0 (original FTS, weight=2.0):
+  [doc1: -8.5, doc2: -3.2, doc3: -1.5]
+  → [doc1: 0.89, doc2: 0.76, doc3: 0.60]
+
+List 1 (original vec, weight=2.0):
+  [doc2: 0.15, doc4: 0.25, doc1: 0.30]
+  → [doc2: 0.85, doc4: 0.75, doc1: 0.70]
+
+List 2 (lex expanded, weight=1.0):
+  [doc1: -5.0, doc3: -2.0]
+  → [doc1: 0.83, doc3: 0.67]
+
+List 3 (vec expanded, weight=1.0):
+  [doc4: 0.20, doc5: 0.35]
+  → [doc4: 0.80, doc5: 0.65]
+```
+
+### Step 3: RRF Fusion
+
+```
+doc1:
+  List 0 rank 0: 2.0 / (60 + 0 + 1) = 0.0328
+  List 1 rank 2: 2.0 / (60 + 2 + 1) = 0.0317
+  List 2 rank 0: 1.0 / (60 + 0 + 1) = 0.0164
+  RRF = 0.0809 + 0.05 (rank #1 bonus) = 0.1309
+
+doc2:
+  List 0 rank 1: 2.0 / (60 + 1 + 1) = 0.0323
+  List 1 rank 0: 2.0 / (60 + 0 + 1) = 0.0328
+  RRF = 0.0651 + 0.05 (rank #1 bonus) = 0.1151
+
+doc3:
+  List 0 rank 2: 2.0 / (60 + 2 + 1) = 0.0317
+  List 2 rank 1: 1.0 / (60 + 1 + 1) = 0.0161
+  RRF = 0.0478 + 0.02 (rank #2 bonus) = 0.0678
+
+... (doc4, doc5)
+
+RRF ranking: [doc1, doc2, doc3, doc4, doc5]
+```
+
+### Step 4: Reranking
+
+```
+Reranker scores (on best chunks):
+  doc1: 0.45
+  doc2: 0.85
+  doc3: 0.30
+  doc4: 0.75
+  doc5: 0.60
+```
+
+### Step 5: Position-Aware Blending
+
+```
+doc1 (RRF rank 1):
+  rrfScore = 1/1 = 1.0
+  rerankScore = 0.45
+  rrfWeight = 0.75
+  blended = 0.75 × 1.0 + 0.25 × 0.45 = 0.8625  ← Preserved
+
+doc2 (RRF rank 2):
+  rrfScore = 1/2 = 0.5
+  rerankScore = 0.85
+  rrfWeight = 0.75
+  blended = 0.75 × 0.5 + 0.25 × 0.85 = 0.5875
+
+doc3 (RRF rank 3):
+  rrfScore = 1/3 = 0.333
+  rerankScore = 0.30
+  rrfWeight = 0.75
+  blended = 0.75 × 0.333 + 0.25 × 0.30 = 0.325
+
+doc4 (RRF rank 4):
+  rrfScore = 1/4 = 0.25
+  rerankScore = 0.75
+  rrfWeight = 0.60
+  blended = 0.60 × 0.25 + 0.40 × 0.75 = 0.450
+
+Final ranking: [doc1: 0.863, doc2: 0.588, doc4: 0.450, doc3: 0.325, doc5: ...]
+```
+
+### Result
+
+1. **doc1** stays #1 (strong keyword + semantic match, preserved by position-aware blending)
+2. **doc2** stays #2 (strong semantic match)
+3. **doc4** promoted to #3 (reranker elevated it)
+4. **doc3** drops to #4 (weak reranker score)
+
+The position-aware blending prevented doc1 from being demoted despite a mediocre reranker score, while still allowing doc4 to be promoted based on semantic relevance.

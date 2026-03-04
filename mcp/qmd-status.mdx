@@ -1,0 +1,198 @@
+---
+title: status Tool
+description: Check QMD index status and collection health
+---
+
+## Overview
+
+The `status` tool reports the current state of the QMD index:
+
+- Total document count
+- Embedding status (for vector search)
+- Collection details
+- Health indicators
+
+## Input Schema
+
+No parameters required. Call with an empty object:
+
+```json
+{}
+```
+
+## Response Format
+
+<ResponseField name="content" type="array">
+  Array with a single text element containing a human-readable summary
+  
+  <Expandable title="content[0]">
+    <ResponseField name="type" type="string">
+      Always `"text"`
+    </ResponseField>
+    
+    <ResponseField name="text" type="string">
+      Summary like:
+      ```
+      QMD Index Status:
+        Total documents: 1234
+        Needs embedding: 0
+        Vector index: yes
+        Collections: 3
+          - /home/user/notes (450 docs)
+          - /home/user/docs (300 docs)
+          - /home/user/journals (484 docs)
+      ```
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="structuredContent" type="object">
+  Machine-readable status details
+  
+  <Expandable title="StatusResult object">
+    <ResponseField name="totalDocuments" type="number">
+      Total number of indexed documents across all collections
+    </ResponseField>
+    
+    <ResponseField name="needsEmbedding" type="number">
+      Number of documents without embeddings. Run `qmd embed` if > 0.
+    </ResponseField>
+    
+    <ResponseField name="hasVectorIndex" type="boolean">
+      Whether vector search is available. `false` means `qmd embed` has never been run.
+    </ResponseField>
+    
+    <ResponseField name="collections" type="array">
+      Array of collection objects
+      
+      <Expandable title="Collection object">
+        <ResponseField name="name" type="string">
+          Collection name (from `qmd collection add --name`)
+        </ResponseField>
+        
+        <ResponseField name="path" type="string">
+          Absolute filesystem path to collection root
+        </ResponseField>
+        
+        <ResponseField name="pattern" type="string">
+          Glob pattern for indexed files (e.g., `**/*.md`)
+        </ResponseField>
+        
+        <ResponseField name="documents" type="number">
+          Number of documents in this collection
+        </ResponseField>
+        
+        <ResponseField name="lastUpdated" type="string">
+          ISO 8601 timestamp of last index update
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Example
+
+**Request:**
+```json
+{}
+```
+
+**Response:**
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "QMD Index Status:\n  Total documents: 1234\n  Needs embedding: 0\n  Vector index: yes\n  Collections: 3\n    - /home/user/notes (450 docs)\n    - /home/user/docs (300 docs)\n    - /home/user/journals (484 docs)"
+    }
+  ],
+  "structuredContent": {
+    "totalDocuments": 1234,
+    "needsEmbedding": 0,
+    "hasVectorIndex": true,
+    "collections": [
+      {
+        "name": "notes",
+        "path": "/home/user/notes",
+        "pattern": "**/*.md",
+        "documents": 450,
+        "lastUpdated": "2025-05-15T14:23:10.000Z"
+      },
+      {
+        "name": "docs",
+        "path": "/home/user/docs",
+        "pattern": "**/*.md",
+        "documents": 300,
+        "lastUpdated": "2025-05-15T14:23:10.000Z"
+      },
+      {
+        "name": "journals",
+        "path": "/home/user/journals",
+        "pattern": "**/*.md",
+        "documents": 484,
+        "lastUpdated": "2025-05-15T14:23:10.000Z"
+      }
+    ]
+  }
+}
+```
+
+## Use Cases
+
+### Check if Embeddings are Available
+
+Before using `vec` or `hyde` search:
+
+```json
+{}
+```
+
+Check `hasVectorIndex` in the response. If `false`, vector search will fail. Run:
+
+```bash
+qmd embed
+```
+
+### Verify Index is Up-to-Date
+
+Check `needsEmbedding` count. If > 0, run:
+
+```bash
+qmd embed
+```
+
+to generate embeddings for new documents.
+
+### List All Collections
+
+Use `structuredContent.collections` to see all indexed collections and their document counts.
+
+### Debugging Search Issues
+
+If search returns no results:
+
+1. Check `totalDocuments` — is the index populated?
+2. Check `collections` — is the expected collection present?
+3. Check `hasVectorIndex` — are you using `vec`/`hyde` without embeddings?
+
+## CLI Equivalent
+
+```bash
+qmd status
+```
+
+Outputs the same information in a formatted table.
+
+## Related Tools
+
+<CardGroup cols={2}>
+  <Card title="query Tool" icon="magnifying-glass" href="/mcp/qmd-search">
+    Search the index after verifying status
+  </Card>
+  <Card title="Embeddings" icon="cube" href="/concepts/embeddings">
+    Learn how to generate embeddings
+  </Card>
+  <Card title="Collections" icon="folder" href="/cli/collection">
+    Manage collections via CLI
+  </Card>
+</CardGroup>

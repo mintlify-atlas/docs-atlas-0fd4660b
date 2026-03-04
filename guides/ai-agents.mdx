@@ -1,0 +1,458 @@
+---
+title: AI Agents
+description: Integrating QMD with AI agents and LLM workflows
+---
+
+QMD is designed for agentic workflows. It provides structured output formats, stable document identifiers, and semantic search optimized for LLM context retrieval.
+
+## Output Formats for Agents
+
+QMD supports multiple output formats tailored for different use cases:
+
+### JSON - Structured Data
+
+Perfect for programmatic processing:
+
+```bash
+qmd search --json "authentication" -n 10
+```
+
+**Output:**
+```json
+[
+  {
+    "docid": "#a1b2c3",
+    "score": 0.93,
+    "file": "docs/auth-guide.md",
+    "title": "Authentication Guide",
+    "context": "Work documentation",
+    "snippet": "JWT tokens are validated...\nMiddleware checks..."
+  }
+]
+```
+
+Access specific fields:
+
+```bash
+qmd search --json "API" | jq -r '.[] | select(.score > 0.7) | .file'
+```
+
+### CSV - Spreadsheet/Table Format
+
+Easy to parse and process:
+
+```bash
+qmd search --csv "error handling" > results.csv
+```
+
+```csv
+docid,score,file,title,context,line,snippet
+#a1b2c3,0.93,docs/errors.md,Error Handling,Work docs,42,"Try-catch patterns..."
+```
+
+Parse in Python:
+
+```python
+import csv
+import subprocess
+
+result = subprocess.run(
+    ["qmd", "search", "--csv", "authentication"],
+    capture_output=True, text=True
+)
+
+reader = csv.DictReader(result.stdout.splitlines())
+for row in reader:
+    if float(row['score']) > 0.7:
+        print(f"{row['file']}: {row['title']}")
+```
+
+### Markdown - LLM Context
+
+Format designed for LLM prompts:
+
+```bash
+qmd query --md --full "error handling" > context.md
+```
+
+**Output:**
+```markdown
+---
+# Error Handling Guide
+
+**docid:** `#a1b2c3`
+**context:** Work documentation
+
+Try-catch blocks should wrap async operations...
+Error boundaries in React components...
+```
+
+Use in a prompt:
+
+```bash
+cat <<EOF | llm
+Based on this context:
+
+$(qmd query --md "error handling" -n 5)
+
+Explain the recommended error handling pattern.
+EOF
+```
+
+### XML - Structured Documents
+
+XML format for tools that require it:
+
+```bash
+qmd search --xml "API design"
+```
+
+```xml
+<file docid="#a1b2c3" name="docs/api.md" title="API Guide" context="Work docs">
+REST API design principles:
+1. Use resource-oriented URLs
+2. HTTP methods for CRUD operations
+</file>
+```
+
+### Files List - Minimal Format
+
+Just the essentials (docid, score, path, context):
+
+```bash
+qmd search --files "authentication" --all --min-score 0.4
+```
+
+```
+#a1b2c3,0.89,docs/auth.md,"Authentication patterns"
+#d4e5f6,0.67,notes/security.md,"Security notes"
+#789abc,0.45,archive/old-auth.md,"Deprecated docs"
+```
+
+Perfect for pipelines:
+
+```bash
+qmd search --files --min-score 0.5 "error" | while IFS=, read -r docid score file context; do
+  echo "Processing $file (score: $score)"
+  qmd get "$docid" | your-processor
+done
+```
+
+## Agent Workflow Examples
+
+### Example 1: RAG Pipeline
+
+Retrieve relevant context for a question:
+
+```bash
+#!/bin/bash
+QUESTION="How does authentication work in our API?"
+
+# Step 1: Search for relevant documents
+DOCS=$(qmd query --json --min-score 0.5 "$QUESTION" | jq -r '.[].docid')
+
+# Step 2: Retrieve full content
+CONTEXT=""
+for docid in $DOCS; do
+  CONTEXT+=$(qmd get "$docid")
+  CONTEXT+=$'\n\n---\n\n'
+done
+
+# Step 3: Send to LLM
+cat <<EOF | llm
+Context:
+$CONTEXT
+
+Question: $QUESTION
+
+Answer based on the context above:
+EOF
+```
+
+### Example 2: Multi-Step Research Agent
+
+```python
+import subprocess
+import json
+
+def qmd_search(query, min_score=0.5, limit=5):
+    """Search QMD and return structured results."""
+    result = subprocess.run(
+        ["qmd", "query", "--json", "-n", str(limit), "--min-score", str(min_score), query],
+        capture_output=True,
+        text=True
+    )
+    return json.loads(result.stdout)
+
+def qmd_get(docid):
+    """Retrieve full document content by docid."""
+    result = subprocess.run(
+        ["qmd", "get", docid],
+        capture_output=True,
+        text=True
+    )
+    return result.stdout
+
+def research_agent(question):
+    """Multi-step research agent."""
+    print(f"Question: {question}")
+    
+    # Step 1: Initial search
+    results = qmd_search(question, min_score=0.6, limit=3)
+    
+    if not results:
+        return "No relevant documents found."
+    
+    # Step 2: Gather context
+    context = []
+    for doc in results:
+        content = qmd_get(doc['docid'])
+        context.append({
+            'file': doc['file'],
+            'score': doc['score'],
+            'content': content[:1000]  # First 1000 chars
+        })
+    
+    # Step 3: Analyze and follow up
+    # (Send to LLM, extract entities, do follow-up searches, etc.)
+    
+    return context
+
+# Usage
+research_agent("What are our API authentication patterns?")
+```
+
+### Example 3: Automated Documentation Assistant
+
+```bash
+#!/bin/bash
+# Agent that answers questions from your docs
+
+function ask_docs() {
+  local question="$1"
+  
+  # Search with hybrid query (best results)
+  local results=$(qmd query --json -n 5 --min-score 0.5 "$question")
+  
+  # Extract file list
+  local files=$(echo "$results" | jq -r '.[].file' | head -5)
+  
+  if [ -z "$files" ]; then
+    echo "No relevant documentation found."
+    return 1
+  fi
+  
+  # Build context from top results
+  local context=""
+  for file in $files; do
+    context+="## $file\n\n"
+    context+=$(qmd get "$file" -l 50)  # First 50 lines
+    context+="\n\n---\n\n"
+  done
+  
+  # Send to LLM
+  echo "$context\n\nQuestion: $question\n\nAnswer:" | llm
+}
+
+# Usage
+ask_docs "How do I configure authentication?"
+```
+
+### Example 4: Context-Aware Code Review
+
+```python
+import subprocess
+import json
+
+def get_relevant_docs(code_snippet, doc_type="best practices"):
+    """Find relevant documentation for a code snippet."""
+    # Extract key terms from code
+    query = f"{doc_type} {code_snippet[:200]}"
+    
+    result = subprocess.run(
+        ["qmd", "query", "--json", "-n", "3", "--min-score", "0.4", query],
+        capture_output=True,
+        text=True
+    )
+    
+    docs = json.loads(result.stdout)
+    
+    context = []
+    for doc in docs:
+        full_doc = subprocess.run(
+            ["qmd", "get", doc['docid']],
+            capture_output=True,
+            text=True
+        ).stdout
+        
+        context.append({
+            'source': doc['file'],
+            'relevance': doc['score'],
+            'content': full_doc
+        })
+    
+    return context
+
+# Usage in code review
+code = '''
+async function handleLogin(req, res) {
+  const { username, password } = req.body;
+  const user = await db.users.findOne({ username });
+  if (user && await bcrypt.compare(password, user.hash)) {
+    res.json({ token: jwt.sign({ id: user.id }, SECRET) });
+  }
+}
+'''
+
+docs = get_relevant_docs(code, "authentication security")
+print(f"Found {len(docs)} relevant documents:")
+for doc in docs:
+    print(f"  - {doc['source']} (relevance: {doc['relevance']:.2f})")
+```
+
+## Using the MCP Server
+
+For tighter integration, use QMD's Model Context Protocol server. See [MCP Server Setup](/guides/mcp-server).
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Hybrid Search" icon="code-merge">
+    `qmd query` provides the best results for agent workflows by combining keyword + semantic + reranking.
+  </Card>
+
+  <Card title="Filter by Score" icon="filter">
+    Use `--min-score 0.5` to avoid low-quality results that waste LLM context.
+  </Card>
+
+  <Card title="Leverage Docids" icon="hashtag">
+    Docids are stable references that work even if files move. Store them for follow-up queries.
+  </Card>
+
+  <Card title="Use --all with Thresholds" icon="list">
+    Combine `--all` with `--min-score` to get complete result sets above a quality threshold.
+  </Card>
+
+  <Card title="Add Context Metadata" icon="message-lines">
+    Use `qmd context add` to describe collections. This metadata appears in results and helps agents understand sources.
+  </Card>
+
+  <Card title="Batch Retrieval" icon="layer-group">
+    Use `multi-get` to retrieve multiple documents in one call instead of looping `get` commands.
+  </Card>
+</CardGroup>
+
+## Performance Considerations
+
+### Initial Model Loading
+
+First search loads models (~1-3s). Subsequent searches are fast (~200-500ms).
+
+**Solution:** Use MCP HTTP server to keep models loaded:
+
+```bash
+# Start persistent server
+qmd mcp --http --daemon
+
+# All requests reuse loaded models
+curl -X POST http://localhost:8181/query \
+  -H "Content-Type: application/json" \
+  -d '{"searches": [{"type":"lex","query":"API"}], "limit": 5}'
+```
+
+### Context Window Management
+
+Large result sets can exceed LLM context windows:
+
+```bash
+# Limit results
+qmd query -n 5 --min-score 0.6 "topic"
+
+# Truncate documents
+qmd multi-get "docs/*.md" -l 100  # First 100 lines per doc
+
+# Use snippets instead of full docs
+qmd query --json "topic"  # Returns snippets, not full content
+```
+
+### Caching
+
+QMD caches LLM results (query expansion, reranking) in SQLite:
+
+```bash
+# Clear cache if stale
+qmd cleanup
+```
+
+## Integration Examples
+
+### Claude Desktop (MCP)
+
+See [MCP Server Setup](/guides/mcp-server) for Claude integration.
+
+### Python Script
+
+```python
+import subprocess
+import json
+
+class QMDClient:
+    def search(self, query, limit=5, min_score=0.5):
+        result = subprocess.run(
+            ["qmd", "query", "--json", "-n", str(limit), "--min-score", str(min_score), query],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return json.loads(result.stdout)
+    
+    def get(self, docid_or_path):
+        result = subprocess.run(
+            ["qmd", "get", docid_or_path],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        return result.stdout
+
+qmd = QMDClient()
+results = qmd.search("authentication", limit=3)
+for doc in results:
+    print(f"{doc['file']} (score: {doc['score']})")
+    content = qmd.get(doc['docid'])
+    print(content[:500])  # First 500 chars
+```
+
+### Node.js Script
+
+```javascript
+const { exec } = require('child_process');
+const util = require('util');
+const execPromise = util.promisify(exec);
+
+class QMDClient {
+  async search(query, { limit = 5, minScore = 0.5 } = {}) {
+    const { stdout } = await execPromise(
+      `qmd query --json -n ${limit} --min-score ${minScore} "${query}"`
+    );
+    return JSON.parse(stdout);
+  }
+
+  async get(docidOrPath) {
+    const { stdout } = await execPromise(`qmd get "${docidOrPath}"`);
+    return stdout;
+  }
+}
+
+// Usage
+(async () => {
+  const qmd = new QMDClient();
+  const results = await qmd.search('authentication', { limit: 3 });
+  
+  for (const doc of results) {
+    console.log(`${doc.file} (score: ${doc.score})`);
+    const content = await qmd.get(doc.docid);
+    console.log(content.slice(0, 500));  // First 500 chars
+  }
+})();
+```

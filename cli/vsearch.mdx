@@ -1,0 +1,141 @@
+---
+title: qmd vsearch
+description: Vector semantic search with embeddings
+---
+
+Semantic search using vector embeddings. Finds documents by meaning rather than exact keywords.
+
+## Usage
+
+```bash
+qmd vsearch [options] <query>
+```
+
+<ParamField path="query" type="string" required>
+  Natural language query
+</ParamField>
+
+## Options
+
+<ParamField path="-c, --collection" type="string">
+  Filter by collection name (can be specified multiple times). Defaults to all included collections.
+</ParamField>
+
+<ParamField path="-n" type="number" default="5 (CLI), 20 (JSON/files)">
+  Maximum number of results
+</ParamField>
+
+<ParamField path="--all" type="boolean" default="false">
+  Return all matches (use with `--min-score`)
+</ParamField>
+
+<ParamField path="--min-score" type="number" default="0.3">
+  Minimum similarity score threshold (0-1)
+</ParamField>
+
+<ParamField path="--full" type="boolean" default="false">
+  Show full document instead of snippet
+</ParamField>
+
+<ParamField path="--line-numbers" type="boolean" default="false">
+  Add line numbers to output
+</ParamField>
+
+<ParamField path="--json" type="boolean" default="false">
+  Output as JSON
+</ParamField>
+
+<ParamField path="--csv" type="boolean" default="false">
+  Output as CSV
+</ParamField>
+
+<ParamField path="--md" type="boolean" default="false">
+  Output as Markdown
+</ParamField>
+
+<ParamField path="--xml" type="boolean" default="false">
+  Output as XML
+</ParamField>
+
+<ParamField path="--files" type="boolean" default="false">
+  Output file paths only (with docid and score)
+</ParamField>
+
+## How It Works
+
+1. **Query embedding** — Convert your query to a vector using the embedding model
+2. **Vector search** — Find nearest neighbors in the vector index using cosine similarity
+3. **Expansion** — Automatically generates related queries (lexical, vector, hypothetical)
+4. **Fusion** — Combines results using Reciprocal Rank Fusion (RRF)
+
+## Examples
+
+```bash
+# Semantic search
+qmd vsearch "how does authentication work"
+
+# Search specific collection
+qmd vsearch "deployment strategies" -c devops
+
+# Higher threshold for quality
+qmd vsearch "database design" --min-score 0.5
+
+# Get all semantic matches
+qmd vsearch "error handling" --all --min-score 0.3
+
+# JSON output
+qmd vsearch "CI/CD pipeline" --json -n 10
+```
+
+## Query Expansion
+
+Vector search automatically expands your query into multiple forms:
+
+- **lex:** Keyword-optimized version for BM25 search
+- **vec:** Semantic variations for vector search
+- **hyde:** Hypothetical document text that would answer the query
+
+Example expansion for "how does auth work":
+```
+├─ how does auth work
+├─ lex: authentication authorization security login
+├─ vec: authentication workflow authorization flow
+└─ hyde: Authentication uses JWT tokens stored in cookies...
+```
+
+## Embedding Model
+
+Default model: `embeddinggemma` (google/gemma-2-2b-it-qn_k_m from Hugging Face)
+
+- **Dimensions:** 2048
+- **Chunking:** 900 tokens/chunk with 15% overlap
+- **Boundaries:** Prefers markdown headings
+
+Run [`qmd embed`](/cli/embed) to generate embeddings before using vector search.
+
+## Performance
+
+Vector search is slower than BM25 but finds semantically similar content:
+
+- **Embedding query:** ~50-200ms
+- **Vector search:** ~10-50ms
+- **Total:** ~100-300ms (without expansion)
+
+For best results, use [`qmd query`](/cli/query) which combines vector search with BM25 and reranking.
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="qmd query" icon="sparkles" href="/cli/query">
+    Hybrid search with reranking (recommended)
+  </Card>
+  <Card title="qmd search" icon="magnifying-glass" href="/cli/search">
+    Fast BM25 keyword search
+  </Card>
+  <Card title="qmd embed" icon="cube" href="/cli/embed">
+    Generate vector embeddings
+  </Card>
+  <Card title="Vector search guide" icon="book" href="/concepts/embeddings">
+    Learn more about embeddings
+  </Card>
+</CardGroup>

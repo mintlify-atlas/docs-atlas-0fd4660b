@@ -1,0 +1,600 @@
+---
+title: MCP Server
+description: Setting up the Model Context Protocol server for Claude and other MCP clients
+---
+
+QMD exposes a Model Context Protocol (MCP) server for tight integration with Claude Desktop, Claude Code, and other MCP-compatible clients.
+
+## What is MCP?
+
+Model Context Protocol (MCP) is an open standard for connecting LLMs to external data sources. QMD's MCP server exposes search and document retrieval as:
+
+- **Tools** - Functions the LLM can call (search, get documents, etc.)
+- **Resources** - Documents accessible via `qmd://` URIs
+- **Instructions** - Auto-injected context about your indexed content
+
+## Transport Options
+
+QMD supports two MCP transport modes:
+
+### Stdio (default)
+
+Launched as a subprocess by each client. Simple but loads models on every connection.
+
+```bash
+qmd mcp
+```
+
+### HTTP (recommended)
+
+Long-lived server that keeps models loaded in VRAM. Much faster for repeated queries.
+
+<CodeGroup>
+```bash Foreground
+qmd mcp --http
+# Listening on http://localhost:8181/mcp
+```
+
+```bash Custom Port
+qmd mcp --http --port 8080
+```
+
+```bash Background Daemon
+qmd mcp --http --daemon
+# Server runs in background, PID stored in ~/.cache/qmd/mcp.pid
+```
+</CodeGroup>
+
+**Stop the daemon:**
+
+```bash
+qmd mcp stop
+```
+
+**Check status:**
+
+```bash
+qmd status
+```
+
+**Output:**
+```
+QMD Status
+
+Index: /home/user/.cache/qmd/index.sqlite
+Size:  45.2 MB
+MCP:   running (PID 12345)
+...
+```
+
+## HTTP Server Endpoints
+
+The HTTP server exposes:
+
+- `POST /mcp` - MCP Streamable HTTP (JSON responses, stateless)
+- `POST /query` - Direct structured search (no MCP wrapper)
+- `GET /health` - Liveness check with uptime
+
+### Direct Query Endpoint
+
+Skip MCP protocol overhead for simple searches:
+
+```bash
+curl -X POST http://localhost:8181/query \
+  -H "Content-Type: application/json" \
+  -d '{
+    "searches": [
+      {"type": "lex", "query": "authentication"},
+      {"type": "vec", "query": "how to authenticate users"}
+    ],
+    "limit": 5,
+    "minScore": 0.5
+  }'
+```
+
+**Response:**
+```json
+{
+  "results": [
+    {
+      "docid": "#a1b2c3",
+      "file": "docs/auth-guide.md",
+      "title": "Authentication Guide",
+      "score": 0.93,
+      "context": "Work documentation",
+      "snippet": "1: JWT tokens are validated...\n2: Middleware checks..."
+    }
+  ]
+}
+```
+
+## Claude Desktop Setup
+
+### macOS Configuration
+
+Edit `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+<Tabs>
+  <Tab title="Stdio (simple)">
+    ```json
+    {
+      "mcpServers": {
+        "qmd": {
+          "command": "qmd",
+          "args": ["mcp"]
+        }
+      }
+    }
+    ```
+
+    <Note>
+    Stdio mode loads models on every Claude restart (~1-3s startup time).
+    </Note>
+  </Tab>
+
+  <Tab title="HTTP (recommended)">
+    First, start the daemon:
+
+    ```bash
+    qmd mcp --http --daemon
+    ```
+
+    Then configure Claude to use it:
+
+    ```json
+    {
+      "mcpServers": {
+        "qmd": {
+          "url": "http://localhost:8181/mcp"
+        }
+      }
+    }
+    ```
+
+    <Note>
+    HTTP mode keeps models loaded. Queries are instant after first run.
+    </Note>
+  </Tab>
+</Tabs>
+
+### Windows Configuration
+
+Edit `%APPDATA%\Claude\claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "qmd": {
+      "command": "qmd.exe",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Linux Configuration
+
+Edit `~/.config/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "qmd": {
+      "command": "qmd",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+<Note>
+Restart Claude Desktop after editing the configuration.
+</Note>
+
+## Claude Code Setup
+
+### Using the Plugin (Recommended)
+
+Install from the marketplace:
+
+```bash
+claude marketplace add tobi/qmd
+claude plugin add qmd@qmd
+```
+
+### Manual MCP Configuration
+
+Edit `~/.claude/settings.json`:
+
+<CodeGroup>
+```json Stdio
+{
+  "mcpServers": {
+    "qmd": {
+      "command": "qmd",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+```json HTTP
+{
+  "mcpServers": {
+    "qmd": {
+      "url": "http://localhost:8181/mcp"
+    }
+  }
+}
+```
+</CodeGroup>
+
+## MCP Tools
+
+The QMD MCP server exposes these tools to LLMs:
+
+### `query` - Structured Search
+
+Search using typed sub-queries (lex/vec/hyde):
+
+**Parameters:**
+- `searches` (required) - Array of `{type: 'lex'|'vec'|'hyde', query: string}`
+- `limit` (optional) - Max results (default: 10)
+- `minScore` (optional) - Min relevance 0-1 (default: 0)
+- `collections` (optional) - Filter to specific collections
+
+**Example LLM usage:**
+
+> "Search for authentication patterns"
+
+LLM calls:
+```json
+{
+  "tool": "query",
+  "parameters": {
+    "searches": [
+      {"type": "lex", "query": "authentication"},
+      {"type": "vec", "query": "how to authenticate users"}
+    ],
+    "limit": 5
+  }
+}
+```
+
+**Returns:**
+```json
+{
+  "results": [
+    {
+      "docid": "#a1b2c3",
+      "file": "docs/auth-guide.md",
+      "title": "Authentication Guide",
+      "score": 0.93,
+      "context": "Work documentation",
+      "snippet": "JWT authentication flow...\nMiddleware checks..."
+    }
+  ]
+}
+```
+
+### `get` - Retrieve Document
+
+Get a single document by path or docid:
+
+**Parameters:**
+- `file` (required) - Path or docid (e.g., `notes/meeting.md`, `#abc123`, `notes/meeting.md:100`)
+- `fromLine` (optional) - Start from line number
+- `maxLines` (optional) - Maximum lines to return
+- `lineNumbers` (optional) - Add line numbers to output
+
+**Example:**
+
+```json
+{
+  "tool": "get",
+  "parameters": {
+    "file": "#a1b2c3",
+    "fromLine": 50,
+    "maxLines": 100,
+    "lineNumbers": true
+  }
+}
+```
+
+**Returns:** MCP resource with document content
+
+### `multi_get` - Retrieve Multiple Documents
+
+Batch retrieve documents by glob or list:
+
+**Parameters:**
+- `pattern` (required) - Glob pattern or comma-separated list
+- `maxLines` (optional) - Max lines per file
+- `maxBytes` (optional) - Skip files larger than this (default: 10KB)
+- `lineNumbers` (optional) - Add line numbers
+
+**Example:**
+
+```json
+{
+  "tool": "multi_get",
+  "parameters": {
+    "pattern": "journals/2025-05*.md",
+    "maxLines": 50
+  }
+}
+```
+
+**Returns:** Array of MCP resources (one per file)
+
+### `status` - Index Status
+
+Get information about the QMD index:
+
+**Example:**
+
+```json
+{
+  "tool": "status",
+  "parameters": {}
+}
+```
+
+**Returns:**
+```json
+{
+  "totalDocuments": 245,
+  "needsEmbedding": 12,
+  "hasVectorIndex": true,
+  "collections": [
+    {
+      "name": "notes",
+      "path": "/home/user/notes",
+      "pattern": "**/*.md",
+      "documents": 142,
+      "lastUpdated": "2025-01-15T10:30:00Z"
+    }
+  ]
+}
+```
+
+## MCP Resources
+
+Documents are exposed as `qmd://` resources:
+
+- `qmd://notes/meeting.md`
+- `qmd://docs/api-guide.md`
+
+LLMs can reference these URIs to request specific documents.
+
+## Auto-Injected Instructions
+
+When Claude connects to QMD's MCP server, it receives instructions about your indexed content:
+
+**Example:**
+
+```
+QMD is your local search engine over 245 markdown documents.
+
+Collections (scope with `collection` parameter):
+  - "notes" (142 docs) — Personal notes and ideas
+  - "docs" (89 docs) — Work documentation
+  - "meetings" (67 docs) — Meeting transcripts
+
+Search: Use `query` with sub-queries (lex/vec/hyde):
+  - type:'lex' — BM25 keyword search (exact terms, fast)
+  - type:'vec' — semantic vector search (meaning-based)
+  - type:'hyde' — hypothetical document (write what the answer looks like)
+
+Examples:
+  Quick keyword lookup: [{type:'lex', query:'error handling'}]
+  Semantic search: [{type:'vec', query:'how to handle errors gracefully'}]
+  Best results: [{type:'lex', query:'error'}, {type:'vec', query:'error handling best practices'}]
+
+Retrieval:
+  - `get` — single document by path or docid (#abc123). Supports line offset.
+  - `multi_get` — batch retrieve by glob or comma-separated list.
+
+Tips:
+  - File paths in results are relative to their collection.
+  - Use `minScore: 0.5` to filter low-confidence results.
+  - Results include a `context` field describing the content type.
+```
+
+This context helps the LLM understand what's searchable without making tool calls.
+
+## Performance: HTTP vs Stdio
+
+### Stdio Mode
+
+**Pros:**
+- Simple configuration
+- No background process
+
+**Cons:**
+- Models load on every client connection (~1-3s startup)
+- GPU memory released between sessions
+
+### HTTP Mode
+
+**Pros:**
+- Models stay loaded in VRAM across requests
+- First query: ~1-3s (model loading)
+- Subsequent queries: ~200-500ms (cached)
+- Embedding/reranking contexts disposed after 5 min idle
+
+**Cons:**
+- Requires background daemon
+- Uses VRAM even when idle
+
+<Note>
+For best performance, use HTTP mode: `qmd mcp --http --daemon`
+</Note>
+
+## Usage Examples in Claude
+
+### Example 1: Ask a Question
+
+**You:** "What are our authentication best practices?"
+
+**Claude:**
+
+1. Calls `query` tool:
+   ```json
+   {
+     "searches": [
+       {"type": "lex", "query": "authentication best practices"},
+       {"type": "vec", "query": "secure authentication patterns"}
+     ],
+     "limit": 5
+   }
+   ```
+
+2. Gets results with docids
+
+3. Calls `get` to retrieve full documents:
+   ```json
+   {"file": "#a1b2c3"}
+   ```
+
+4. Synthesizes answer from retrieved documents
+
+### Example 2: Find Related Documents
+
+**You:** "Find all meeting notes from January 2025"
+
+**Claude:**
+
+1. Calls `multi_get`:
+   ```json
+   {
+     "pattern": "meetings/2025-01-*.md"
+   }
+   ```
+
+2. Lists files and summarizes content
+
+### Example 3: Filter by Collection
+
+**You:** "Search only work docs for API patterns"
+
+**Claude:**
+
+1. Calls `query`:
+   ```json
+   {
+     "searches": [
+       {"type": "lex", "query": "API patterns"}
+     ],
+     "collections": ["docs"],
+     "limit": 10
+   }
+   ```
+
+2. Returns results only from `docs` collection
+
+## Troubleshooting
+
+### Claude doesn't see QMD tools
+
+1. Check config file location:
+   - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+   - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+   - Linux: `~/.config/Claude/claude_desktop_config.json`
+
+2. Verify JSON syntax is valid
+
+3. Restart Claude Desktop
+
+4. Check Claude's MCP logs (usually in app settings)
+
+### HTTP server not responding
+
+1. Check if daemon is running:
+   ```bash
+   qmd status
+   ```
+
+2. Test health endpoint:
+   ```bash
+   curl http://localhost:8181/health
+   ```
+
+3. Check logs:
+   ```bash
+   tail -f ~/.cache/qmd/mcp.log
+   ```
+
+4. Restart daemon:
+   ```bash
+   qmd mcp stop
+   qmd mcp --http --daemon
+   ```
+
+### Slow first query
+
+This is normal. Models load on first use (~1-3s). Use HTTP mode to keep them loaded:
+
+```bash
+qmd mcp --http --daemon
+```
+
+### Port already in use
+
+```bash
+# Use different port
+qmd mcp --http --port 8182
+```
+
+Update Claude config:
+
+```json
+{
+  "mcpServers": {
+    "qmd": {
+      "url": "http://localhost:8182/mcp"
+    }
+  }
+}
+```
+
+## Security Notes
+
+- HTTP server binds to `localhost` only (not accessible from network)
+- No authentication required (local-only by design)
+- Documents are read-only (MCP tools cannot modify files)
+
+## Advanced: Custom MCP Clients
+
+Use any MCP client library to connect:
+
+```typescript
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+
+const transport = new StdioClientTransport({
+  command: 'qmd',
+  args: ['mcp']
+});
+
+const client = new Client({
+  name: 'my-app',
+  version: '1.0.0'
+}, { capabilities: {} });
+
+await client.connect(transport);
+
+// List tools
+const tools = await client.listTools();
+console.log(tools);
+
+// Call query tool
+const result = await client.callTool('query', {
+  searches: [
+    { type: 'lex', query: 'authentication' }
+  ],
+  limit: 5
+});
+
+console.log(result);
+```

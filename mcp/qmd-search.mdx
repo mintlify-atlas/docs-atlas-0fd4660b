@@ -1,0 +1,252 @@
+---
+title: query Tool
+description: Multi-strategy search with typed sub-queries (lex/vec/hyde)
+---
+
+## Overview
+
+The `query` tool is the primary search interface for QMD's MCP server. It accepts a **query document** — an array of typed sub-queries that are executed in parallel and combined using Reciprocal Rank Fusion (RRF).
+
+## Input Schema
+
+<ParamField path="searches" type="array" required>
+  Array of 1-10 typed sub-queries. First sub-query gets 2× weight.
+  
+  <Expandable title="Sub-query object">
+    <ParamField path="type" type="enum" required>
+      Query type: `lex` (BM25), `vec` (semantic), or `hyde` (hypothetical document)
+    </ParamField>
+    
+    <ParamField path="query" type="string" required>
+      The query text. Format depends on type:
+      - **lex**: Keywords, `"quoted phrases"`, `-negation`
+      - **vec**: Natural language question
+      - **hyde**: 50-100 word passage describing the ideal answer
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="limit" type="number" default="10">
+  Maximum number of results to return
+</ParamField>
+
+<ParamField path="minScore" type="number" default="0">
+  Minimum relevance score (0-1). Filters out low-confidence results.
+</ParamField>
+
+<ParamField path="collections" type="string[]">
+  Filter to specific collections (OR match). If omitted, uses default collections from config.
+</ParamField>
+
+## Query Types
+
+### lex — BM25 Keyword Search
+
+Full-text search using SQLite FTS5. Fast, exact, no LLM required.
+
+**Syntax:**
+- `term` — Prefix match ("perf" matches "performance")
+- `"exact phrase"` — Phrase must appear verbatim
+- `-term` or `-"phrase"` — Exclude documents containing this
+
+**Examples:**
+```json
+{ "type": "lex", "query": "error handling" }
+{ "type": "lex", "query": "\"connection pool\" timeout -redis" }
+{ "type": "lex", "query": "handleError async typescript" }
+```
+
+### vec — Semantic Vector Search
+
+Find documents by meaning, not exact keywords. Requires embeddings (run `qmd embed`).
+
+**Format:** Natural language question
+
+**Examples:**
+```json
+{ "type": "vec", "query": "how does the rate limiter handle burst traffic?" }
+{ "type": "vec", "query": "what is the tradeoff between consistency and availability?" }
+```
+
+### hyde — Hypothetical Document Embeddings
+
+Write a 50-100 word passage that looks like the ideal answer. Often the most powerful for nuanced topics.
+
+**Examples:**
+```json
+{
+  "type": "hyde",
+  "query": "The rate limiter uses a token bucket algorithm. When a client exceeds 100 req/min, subsequent requests return 429 until the window resets."
+}
+```
+
+## Search Strategy
+
+Combine multiple query types for best recall:
+
+| Goal | Strategy |
+|------|----------|
+| Known exact term | `lex` only |
+| Concept search | `vec` only |
+| Best recall | `lex` + `vec` |
+| Complex/nuanced | `lex` + `vec` + `hyde` |
+
+**The first sub-query gets 2× weight** — put your strongest signal first.
+
+## Response Format
+
+<ResponseField name="content" type="array">
+  Array with a single text element containing a human-readable summary
+  
+  <Expandable title="content[0]">
+    <ResponseField name="type" type="string">
+      Always `"text"`
+    </ResponseField>
+    
+    <ResponseField name="text" type="string">
+      Summary like: `Found 3 results for "error handling":\n\n#abc123 92% src/errors.ts - Error utilities`
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="structuredContent" type="object">
+  Machine-readable results
+  
+  <Expandable title="structuredContent.results">
+    <ResponseField name="results" type="array">
+      Array of search result objects
+      
+      <Expandable title="Result object">
+        <ResponseField name="docid" type="string">
+          Short document ID with `#` prefix (e.g., `#abc123`). Use with `qmd_get`.
+        </ResponseField>
+        
+        <ResponseField name="file" type="string">
+          File path relative to collection (e.g., `docs/errors.md`)
+        </ResponseField>
+        
+        <ResponseField name="title" type="string">
+          Document title from frontmatter or first heading
+        </ResponseField>
+        
+        <ResponseField name="score" type="number">
+          Relevance score (0-1), rounded to 2 decimals
+        </ResponseField>
+        
+        <ResponseField name="context" type="string | null">
+          Context metadata from `qmd context add`, or null
+        </ResponseField>
+        
+        <ResponseField name="snippet" type="string">
+          Best matching chunk (300 chars) with line numbers
+        </ResponseField>
+      </Expandable>
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+## Examples
+
+### Simple Keyword Lookup
+
+```json
+{
+  "searches": [
+    { "type": "lex", "query": "CAP theorem" }
+  ]
+}
+```
+
+### Best Recall on Technical Topic
+
+```json
+{
+  "searches": [
+    { "type": "lex", "query": "\"connection pool\" timeout -redis" },
+    { "type": "vec", "query": "why do database connections time out under load" },
+    { 
+      "type": "hyde", 
+      "query": "Connection pool exhaustion occurs when all connections are in use and new requests must wait. This typically happens under high concurrency when queries run longer than expected."
+    }
+  ],
+  "limit": 5,
+  "minScore": 0.5
+}
+```
+
+### Intent-Aware Search (C++ Performance, Not Sports)
+
+```json
+{
+  "searches": [
+    { "type": "lex", "query": "\"C++ performance\" optimization -sports -athlete" },
+    { "type": "vec", "query": "how to optimize C++ program performance" }
+  ]
+}
+```
+
+### Collection-Scoped Search
+
+```json
+{
+  "searches": [
+    { "type": "vec", "query": "meeting notes from last week" }
+  ],
+  "collections": ["journals"],
+  "limit": 10
+}
+```
+
+## Response Example
+
+```json
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "Found 2 results for \"error handling\":\n\n#abc123 92% src/errors.ts - Error handling utilities\n#def456 87% docs/errors.md - Error handling guide"
+    }
+  ],
+  "structuredContent": {
+    "results": [
+      {
+        "docid": "#abc123",
+        "file": "src/errors.ts",
+        "title": "Error handling utilities",
+        "score": 0.92,
+        "context": "Source code for error utilities",
+        "snippet": "1: export function handleError(err: Error) {\n2:   logger.error(err.message);\n3:   return { success: false, error: err.message };\n4: }"
+      },
+      {
+        "docid": "#def456",
+        "file": "docs/errors.md",
+        "title": "Error handling guide",
+        "score": 0.87,
+        "context": "Documentation for error handling patterns",
+        "snippet": "15: ## Best Practices\n16: \n17: Always catch errors at the boundary and log them.\n18: Return structured error objects with codes."
+      }
+    ]
+  }
+}
+```
+
+## CLI Equivalent
+
+The `query` tool corresponds to the `qmd query` CLI command:
+
+```bash
+qmd query "error handling" --limit 5 --min-score 0.5
+```
+
+The CLI uses automatic query expansion, while the MCP tool gives you explicit control over sub-query types.
+
+## Related Tools
+
+<CardGroup cols={2}>
+  <Card title="get Tool" icon="file" href="/mcp/qmd-get">
+    Retrieve documents from search results
+  </Card>
+  <Card title="status Tool" icon="chart-simple" href="/mcp/qmd-status">
+    Check if embeddings are available for vec/hyde
+  </Card>
+</CardGroup>

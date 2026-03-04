@@ -1,0 +1,378 @@
+---
+title: Searching
+description: How to search effectively, understanding scores, and filtering options
+---
+
+QMD offers three search modes with different speed and quality tradeoffs:
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                        Search Modes                              │
+├──────────┬───────────────────────────────────────────────────────┤
+│ search   │ BM25 full-text search only                           │
+│ vsearch  │ Vector semantic search only                          │
+│ query    │ Hybrid: FTS + Vector + Query Expansion + Re-ranking  │
+└──────────┴───────────────────────────────────────────────────────┘
+```
+
+## Search Modes
+
+### Fast Keyword Search (`search`)
+
+Use BM25 full-text search for fast, keyword-based lookups:
+
+```bash
+qmd search "authentication flow"
+```
+
+**Best for:**
+- Exact terms or phrases you know appear in documents
+- Quick lookups when you know the vocabulary
+- Prefix matching ("auth" matches "authentication")
+
+**FTS5 Query Syntax:**
+
+<CodeGroup>
+```bash Phrase Match
+qmd search "\"connection pool\""
+```
+
+```bash Exclude Terms
+qmd search "performance -sports -athlete"
+```
+
+```bash Multiple Terms
+qmd search "error handling async"
+```
+</CodeGroup>
+
+### Semantic Search (`vsearch`)
+
+Use vector embeddings for meaning-based search:
+
+```bash
+qmd vsearch "how to handle errors gracefully"
+```
+
+**Best for:**
+- Natural language questions
+- Finding concepts even when exact words don't match
+- Cross-language semantic similarity
+
+<Note>
+Vector search requires embeddings. Run `qmd embed` first if you see a warning.
+</Note>
+
+### Hybrid Search (`query`)
+
+**Recommended for best results.** Combines keyword + vector + query expansion + LLM re-ranking:
+
+```bash
+qmd query "user authentication best practices"
+```
+
+**How it works:**
+
+<Steps>
+  <Step title="Query Expansion">
+    LLM generates 1 alternative query. Original query gets 2× weight.
+  </Step>
+  
+  <Step title="Parallel Retrieval">
+    Each query (original + expansion) searches both BM25 and vector indexes.
+  </Step>
+  
+  <Step title="RRF Fusion">
+    Results merged using Reciprocal Rank Fusion with top-rank bonus (+0.05 for #1, +0.02 for #2-3).
+  </Step>
+  
+  <Step title="Re-ranking">
+    Top 30 candidates re-ranked by LLM (yes/no + confidence logprobs).
+  </Step>
+  
+  <Step title="Position-Aware Blending">
+    - Ranks 1-3: 75% retrieval, 25% reranker (preserves exact matches)
+    - Ranks 4-10: 60% retrieval, 40% reranker
+    - Ranks 11+: 40% retrieval, 60% reranker
+  </Step>
+</Steps>
+
+## Search Options
+
+### Number of Results
+
+```bash
+# Return 10 results
+qmd query -n 10 "API design patterns"
+
+# Return all matches (use with --min-score)
+qmd search --all --min-score 0.3 "error"
+```
+
+Defaults:
+- CLI: 5 results
+- `--json` or `--files`: 20 results
+
+### Minimum Score Threshold
+
+Filter results by relevance score (0.0 - 1.0):
+
+```bash
+# Only show highly relevant results
+qmd query --min-score 0.5 "machine learning"
+
+# Get all matches above threshold
+qmd search --all --min-score 0.3 "API"
+```
+
+### Collection Filtering
+
+Restrict search to specific collections:
+
+<CodeGroup>
+```bash Single Collection
+qmd search "API" -c notes
+```
+
+```bash Multiple Collections
+qmd search "standup" -c meetings -c notes
+```
+</CodeGroup>
+
+Omit `-c` to search all included collections (excludes collections marked with `includeByDefault: false`).
+
+### Full Content vs Snippets
+
+By default, search returns context snippets. Show full documents:
+
+```bash
+qmd search --full "authentication"
+```
+
+### Line Numbers
+
+Add line numbers to output:
+
+```bash
+qmd search --line-numbers "error handling"
+```
+
+## Output Formats
+
+QMD supports multiple output formats for integration with other tools.
+
+<Tabs>
+  <Tab title="CLI (default)">
+    Colorized terminal output with snippets and highlighted matches:
+
+    ```bash
+    qmd search "craftsmanship"
+    ```
+
+    **Output:**
+    ```
+    docs/guide.md:42 #a1b2c3
+    Title: Software Craftsmanship
+    Context: Work documentation
+    Score: 93%
+
+    This section covers the **craftsmanship** of building
+    quality software with attention to detail.
+    See also: engineering principles
+
+
+    notes/meeting.md:15 #d4e5f6
+    Title: Q4 Planning
+    Context: Personal notes and ideas
+    Score: 67%
+
+    Discussion about code quality and craftsmanship
+    in the development process.
+    ```
+  </Tab>
+
+  <Tab title="JSON">
+    Structured output for programmatic use:
+
+    ```bash
+    qmd search --json "authentication"
+    ```
+
+    ```json
+    [
+      {
+        "docid": "#a1b2c3",
+        "score": 0.93,
+        "file": "docs/auth-guide.md",
+        "title": "Authentication Guide",
+        "context": "Work documentation",
+        "snippet": "JWT authentication flow...\nMiddleware checks..."
+      }
+    ]
+    ```
+  </Tab>
+
+  <Tab title="CSV">
+    Spreadsheet-compatible output:
+
+    ```bash
+    qmd search --csv "API" > results.csv
+    ```
+
+    ```csv
+    docid,score,file,title,context,line,snippet
+    #a1b2c3,0.93,docs/api.md,API Guide,Work docs,42,"REST API design..."
+    ```
+  </Tab>
+
+  <Tab title="Markdown">
+    Markdown-formatted results:
+
+    ```bash
+    qmd search --md "errors" > results.md
+    ```
+
+    ```markdown
+    ---
+    # Error Handling Guide
+
+    **docid:** `#a1b2c3`
+    **context:** Work documentation
+
+    Try-catch blocks should wrap...
+    Error boundaries in React...
+    ```
+  </Tab>
+
+  <Tab title="XML">
+    XML-formatted output:
+
+    ```bash
+    qmd search --xml "API"
+    ```
+
+    ```xml
+    <file docid="#a1b2c3" name="docs/api.md" title="API Guide" context="Work docs">
+    REST API design principles...
+    </file>
+    ```
+  </Tab>
+
+  <Tab title="Files List">
+    Simple list for scripting (docid, score, filepath, context):
+
+    ```bash
+    qmd search --files "error" --min-score 0.4
+    ```
+
+    ```
+    #a1b2c3,0.89,docs/errors.md,"Error handling patterns"
+    #d4e5f6,0.67,notes/debugging.md,"Personal notes"
+    ```
+  </Tab>
+</Tabs>
+
+## Understanding Scores
+
+### Score Ranges
+
+| Score | Meaning |
+|-------|----------|
+| 0.8 - 1.0 | Highly relevant - exact matches or strong semantic similarity |
+| 0.5 - 0.8 | Moderately relevant - related content |
+| 0.2 - 0.5 | Somewhat relevant - tangentially related |
+| 0.0 - 0.2 | Low relevance - weak matches |
+
+### How Scores Are Calculated
+
+**BM25 (FTS):**
+- Raw FTS5 BM25 scores: 0 to ~25+
+- Normalized: `Math.abs(score)`
+
+**Vector:**
+- Cosine distance converted: `1 / (1 + distance)`
+- Range: 0.0 to 1.0
+
+**Reranker (hybrid only):**
+- LLM rates 0-10, normalized to 0.0-1.0
+- Blended with retrieval score based on rank position
+
+### Reciprocal Rank Fusion
+
+The `query` command uses RRF to combine multiple result lists:
+
+```
+score = Σ(1/(k+rank+1)) where k=60
+```
+
+**Top-rank bonuses:**
+- #1 in any list: +0.05
+- #2-3 in any list: +0.02
+
+This preserves exact matches while still considering semantic relevance.
+
+## Search Examples
+
+### Quick Keyword Lookup
+
+```bash
+qmd search "CAP theorem"
+```
+
+### Semantic Question
+
+```bash
+qmd vsearch "why do database connections time out under load"
+```
+
+### Best Results with Filtering
+
+```bash
+qmd query -n 10 --min-score 0.5 "authentication best practices" -c docs
+```
+
+### Export for LLM Context
+
+```bash
+qmd search --md --full "error handling" > context.md
+```
+
+### Scripting with JSON
+
+```bash
+qmd query --json "quarterly reports" | jq '.[] | select(.score > 0.6)'
+```
+
+### Find All Matches Above Threshold
+
+```bash
+qmd search --all --files --min-score 0.3 "API design"
+```
+
+## Tips for Better Search Results
+
+<CardGroup cols={2}>
+  <Card title="Add Context" icon="message-lines">
+    Use `qmd context add` to describe collections and paths. Search uses this metadata to improve relevance.
+  </Card>
+
+  <Card title="Use Hybrid Search" icon="code-merge">
+    The `query` command combines keyword + semantic + reranking for best results.
+  </Card>
+
+  <Card title="Filter by Collection" icon="folder">
+    Narrow searches with `-c` when you know which collection contains the answer.
+  </Card>
+
+  <Card title="Adjust Score Threshold" icon="sliders">
+    Use `--min-score 0.5` to filter out low-confidence results, or `--min-score 0.3` for broader recall.
+  </Card>
+</CardGroup>
+
+## Performance Notes
+
+- **`search` (BM25 only):** ~10-50ms, no GPU required
+- **`vsearch` (vectors only):** ~50-200ms, benefits from GPU
+- **`query` (hybrid):** ~1-3s first run (model loading), ~200-500ms cached
+
+Vector and hybrid search keep models in VRAM across requests when using the MCP HTTP server.

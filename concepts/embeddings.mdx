@@ -1,0 +1,440 @@
+---
+title: Vector Embeddings
+description: How QMD generates and uses embeddings for semantic search
+---
+
+QMD uses vector embeddings to enable semantic search. Documents are chunked into ~900 token pieces, embedded using a local GGUF model, and stored in a vector index for fast similarity lookup.
+
+## What are Embeddings?
+
+Embeddings are dense vector representations of text that capture semantic meaning. Similar concepts have similar vectors, even if they use different words:
+
+```
+"authentication"     → [0.23, -0.41, 0.67, ...]
+"user login"         → [0.25, -0.39, 0.65, ...]  # Similar vector
+"database schema"    → [-0.12, 0.71, -0.33, ...] # Different vector
+```
+
+This enables **semantic search** — finding documents by meaning, not just keywords.
+
+## Generating Embeddings
+
+Run `qmd embed` to generate embeddings for all indexed documents:
+
+```bash
+qmd embed
+```
+
+<Info>
+Embeddings are generated **once** and cached. Subsequent `qmd embed` calls only process new or changed documents.
+</Info>
+
+### Force Re-embedding
+
+To regenerate all embeddings (e.g., after model upgrade):
+
+```bash
+qmd embed -f
+```
+
+<Warning>
+Re-embedding large collections can take significant time. Use `-f` only when necessary.
+</Warning>
+
+## Embedding Model
+
+QMD uses **embeddinggemma-300M-Q8_0** for embeddings:
+
+| Property | Value |
+|----------|-------|
+| **Model** | `embeddinggemma-300M-Q8_0.gguf` |
+| **Size** | ~300MB |
+| **Dimensions** | 1024 |
+| **Context** | 2048 tokens |
+| **Format** | GGUF (runs via node-llama-cpp) |
+
+The model is automatically downloaded to `~/.cache/qmd/models/` on first use.
+
+### Embedding Format
+
+Documents are formatted for embeddinggemma using nomic-style prompts:
+
+**For queries:**
+```
+task: search result | query: {query}
+```
+
+**For documents:**
+```
+title: {document title} | text: {chunk text}
+```
+
+This format matches embeddinggemma's training and improves retrieval quality.
+
+## Smart Chunking Strategy
+
+Documents are split into chunks before embedding. QMD uses **markdown-aware smart chunking** to preserve semantic units.
+
+### Chunking Parameters
+
+```typescript
+CHUNK_SIZE_TOKENS = 900        // Target chunk size
+CHUNK_OVERLAP_TOKENS = 135     // 15% overlap between chunks
+CHUNK_WINDOW_TOKENS = 200      // Search window for break points
+```
+
+### Why 900 Tokens?
+
+- **Fits embedding model context** (2048 tokens)
+- **Balances granularity and coherence** (too small = fragmented, too large = diluted)
+- **Leaves room for overlap** (15% = 135 tokens)
+- **Accommodates title prefix** (~50 tokens for `title: ... | text: ...`)
+
+### 15% Overlap
+
+Chunks overlap by 135 tokens to avoid cutting concepts in half:
+
+```
+Chunk 1: [tokens 0-900]    (900 tokens)
+Chunk 2: [tokens 765-1665] (900 tokens, starts 135 tokens before end of chunk 1)
+Chunk 3: [tokens 1530-2430]
+```
+
+This ensures important concepts near chunk boundaries appear in multiple chunks.
+
+## Smart Boundary Detection
+
+Instead of cutting at hard token boundaries, QMD finds natural markdown break points within a 200-token window.
+
+### Break Point Scores
+
+| Pattern | Score | Description |
+|---------|-------|-------------|
+| `# Heading` | 100 | H1 - major section |
+| `## Heading` | 90 | H2 - subsection |
+| `### Heading` | 80 | H3 |
+| `#### Heading` | 70 | H4 |
+| `##### Heading` | 60 | H5 |
+| `###### Heading` | 50 | H6 |
+| ` ``` ` | 80 | Code block boundary |
+| `---` / `***` | 60 | Horizontal rule |
+| Blank line | 20 | Paragraph boundary |
+| `- item` / `1. item` | 5 | List item |
+| Line break | 1 | Minimal break |
+
+### Scoring Algorithm
+
+1. Scan document for all break points
+2. When approaching 900-token target, search 200 tokens backward
+3. Score each break point: `finalScore = baseScore × (1 - (distance/window)² × 0.7)`
+4. Cut at highest-scoring break point
+
+The **squared distance decay** means a heading 200 tokens back (score ~30) still beats a simple line break at the target (score 1).
+
+### Code Fence Protection
+
+Break points inside code blocks are ignored — code stays together. If a code block exceeds the chunk size, it's kept whole when possible.
+
+```markdown
+This is text before code.
+
+```python
+# This entire code block stays together,
+# even if it's large
+def authenticate(user):
+    # ...
+```
+
+This is text after code.
+```
+
+## Storage Schema
+
+Embeddings are stored in two SQLite tables:
+
+### content_vectors
+
+Metadata about each chunk:
+
+```sql
+CREATE TABLE content_vectors (
+  hash TEXT NOT NULL,           -- Document hash
+  seq INTEGER NOT NULL,         -- Chunk sequence (0, 1, 2...)
+  pos INTEGER NOT NULL,         -- Character position in original
+  model TEXT NOT NULL,          -- Embedding model URI
+  embedded_at TEXT NOT NULL,    -- Timestamp
+  PRIMARY KEY (hash, seq)
+);
+```
+
+### vectors_vec
+
+Vector data using [sqlite-vec](https://github.com/asg017/sqlite-vec):
+
+```sql
+CREATE VIRTUAL TABLE vectors_vec USING vec0(
+  hash_seq TEXT PRIMARY KEY,    -- {hash}_{seq}
+  embedding float[1024]         -- 1024-dim vector
+  distance_metric=cosine        -- Cosine distance
+);
+```
+
+## Vector Search Process
+
+<Steps>
+
+<Step title="Embed Query">
+Query is embedded using embeddinggemma:
+
+```
+task: search result | query: how does authentication work
+```
+
+Produces 1024-dim query vector.
+</Step>
+
+<Step title="Compute Distances">
+sqlite-vec computes cosine distance between query vector and all document chunk vectors:
+
+```sql
+SELECT hash_seq, distance
+FROM vectors_vec
+WHERE embedding MATCH ?
+ORDER BY distance
+LIMIT 20;
+```
+</Step>
+
+<Step title="Normalize Scores">
+Cosine distance is converted to similarity score:
+
+```typescript
+score = 1 / (1 + distance)
+```
+
+Range: 0.0 (dissimilar) to 1.0 (identical).
+</Step>
+
+<Step title="Retrieve Chunks">
+For each matching vector, retrieve the document chunk and metadata:
+
+```sql
+SELECT d.collection, d.path, d.title, c.doc, v.pos
+FROM content_vectors v
+JOIN documents d ON d.hash = v.hash
+JOIN content c ON c.hash = v.hash
+WHERE v.hash = ? AND v.seq = ?;
+```
+</Step>
+
+</Steps>
+
+## Embedding Pipeline
+
+```
+Document ──► Smart Chunk (~900 tokens)
+               │
+               ▼
+          Format: "title: {title} | text: {chunk}"
+               │
+               ▼
+          embeddinggemma-300M
+               │
+               ▼
+          1024-dim vector
+               │
+               ▼
+          Store: vectors_vec + content_vectors
+```
+
+## Performance Characteristics
+
+### Embedding Speed
+
+| Hardware | Speed | Chunking + Embedding |
+|----------|-------|----------------------|
+| **CUDA GPU** | ~500 chunks/sec | ~100 docs/sec |
+| **Apple M1/M2** | ~200 chunks/sec | ~40 docs/sec |
+| **CPU only** | ~20 chunks/sec | ~4 docs/sec |
+
+<Info>
+Embedding speed scales with parallelism. QMD creates multiple embedding contexts based on available VRAM/cores.
+</Info>
+
+### Search Speed
+
+| Index Size | GPU | CPU |
+|------------|-----|-----|
+| 1K chunks | ~10ms | ~50ms |
+| 10K chunks | ~30ms | ~200ms |
+| 100K chunks | ~100ms | ~1s |
+
+## GPU Acceleration
+
+QMD auto-detects GPU support and uses the best available backend:
+
+1. **CUDA** (NVIDIA GPUs)
+2. **Metal** (Apple Silicon)
+3. **Vulkan** (cross-platform)
+4. **CPU** (fallback)
+
+Check GPU status:
+
+```bash
+qmd status
+```
+
+Example output:
+
+```
+GPU: cuda (NVIDIA RTX 3090)
+Models loaded: embeddinggemma-300M (1024 dims)
+```
+
+<Warning>
+CPU-only embedding is **very slow** (20× slower than GPU). Consider using a GPU or limiting collection size.
+</Warning>
+
+## Model Cache
+
+Models are downloaded to:
+
+```
+~/.cache/qmd/models/
+```
+
+Directory contents:
+
+```
+embeddinggemma-300M-Q8_0.gguf              (~300MB)
+qwen3-reranker-0.6b-q8_0.gguf              (~640MB)
+qmd-query-expansion-1.7B-q4_k_m.gguf       (~1.1GB)
+```
+
+Total: ~2GB for all models.
+
+## Updating Embeddings
+
+Embeddings are **content-addressed** by document hash. When a document changes:
+
+1. New hash is computed
+2. New embeddings are generated
+3. Old embeddings remain until cleanup
+
+Run cleanup periodically:
+
+```bash
+qmd cleanup
+```
+
+This removes:
+- Orphaned embeddings (no matching document)
+- Inactive document records
+- Stale LLM cache entries
+
+## Context and Embeddings
+
+**Context is NOT embedded in vectors.** 
+
+Chunk embeddings only include:
+- Document title
+- Chunk text
+
+[Context](/concepts/context) is stored separately and returned with search results. This allows changing context without re-embedding.
+
+<Info>
+Context affects search quality through:
+1. **LLM reranking** (reranker sees context)
+2. **Query expansion** (context can inform expansions)
+3. **User understanding** (helps interpret results)
+</Info>
+
+## Best Practices
+
+<AccordionGroup>
+
+<Accordion title="Embed before searching">
+Vector search (`vsearch`, `query`) requires embeddings:
+
+```bash
+qmd collection add ~/notes --name notes
+qmd embed  # Generate embeddings
+qmd vsearch "how to authenticate"  # Now works
+```
+</Accordion>
+
+<Accordion title="Re-embed after major changes">
+If you restructure documents or add significant content, re-embed:
+
+```bash
+qmd update  # Re-index
+qmd embed   # Update embeddings (only changed docs)
+```
+</Accordion>
+
+<Accordion title="Use cleanup regularly">
+Orphaned embeddings waste space. Run cleanup monthly:
+
+```bash
+qmd cleanup
+```
+</Accordion>
+
+<Accordion title="Monitor embedding coverage">
+Check how many documents need embedding:
+
+```bash
+qmd status
+```
+
+Look for "Documents need embedding" count.
+</Accordion>
+
+<Accordion title="Balance chunk size">
+The default 900 tokens works well for most documents. Don't change `CHUNK_SIZE_TOKENS` unless you have a specific need (e.g., very short or very long documents).
+</Accordion>
+
+</AccordionGroup>
+
+## Troubleshooting
+
+### "sqlite-vec extension unavailable"
+
+Vector search requires sqlite-vec. On macOS:
+
+```bash
+brew install sqlite
+```
+
+Set `BREW_PREFIX` if Homebrew is in a non-standard location.
+
+### Slow embedding on CPU
+
+CPU-only embedding is slow. Options:
+1. Use a GPU (CUDA, Metal, or Vulkan)
+2. Reduce collection size
+3. Be patient — embedding is one-time per document
+
+### Out of memory during embedding
+
+QMD auto-detects available VRAM/RAM and creates appropriate parallelism. If you still run out:
+
+1. Close other applications
+2. Reduce collection size
+3. Embed in batches (use collection filters)
+
+### Embeddings not updating
+
+Embeddings are cached by document hash. If content changes:
+
+```bash
+qmd update  # Re-index (updates hashes)
+qmd embed   # Generate new embeddings
+```
+
+## Related
+
+- [Search Modes](/concepts/search-modes) - Using vsearch and query
+- [Collections](/concepts/collections) - Organizing documents
+- [Context Management](/concepts/context) - Adding metadata to chunks
+- [CLI Reference](/cli/embed) - Embed command documentation

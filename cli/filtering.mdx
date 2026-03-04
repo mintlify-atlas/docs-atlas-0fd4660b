@@ -1,0 +1,475 @@
+---
+title: 'Filtering Options'
+description: 'Control search scope with collection filters, result limits, and score thresholds'
+---
+
+QMD provides flexible filtering options to narrow search results and retrieve exactly the documents you need.
+
+## Collection Filtering
+
+Restrict searches to specific collections using `-c` or `--collection`.
+
+### Single Collection
+
+Search only one collection:
+
+```bash
+qmd search "authentication" -c docs
+qmd query "error handling" -c api-reference
+qmd vsearch "deployment guide" -c operations
+```
+
+**Example output:**
+```
+qmd://docs/auth.md  #a3f2c1  [0.84]
+Context: API security documentation
+────────────────────────────────────────────────
+...authentication uses JWT tokens...
+```
+
+### Multiple Collections
+
+Filter across multiple collections (combines results):
+
+```bash
+qmd search "config" -c docs -c examples
+qmd query "database setup" --collection docs --collection guides
+```
+
+**How it works:**
+- Searches all specified collections
+- Combines and ranks results across collections
+- Equivalent to OR logic: `collection=docs OR collection=examples`
+
+### No Filter (Default)
+
+Without `-c`, searches all collections:
+
+```bash
+qmd search "deployment"  # Searches everything
+```
+
+This includes collections with `includeByDefault: true` (default) and excludes those with `includeByDefault: false` in your `~/.config/qmd/index.yml`.
+
+### Collection Name Matching
+
+Collection names can be specified in several ways:
+
+```bash
+# Exact name match
+qmd search "api" -c my-docs
+
+# Works with collection:// virtual paths
+qmd search "auth" -c docs  # Searches qmd://docs/*
+
+# Case-sensitive exact match only
+qmd search "config" -c Docs  # Won't match "docs"
+```
+
+### When to Use Collection Filters
+
+| Use Case | Command |
+|----------|---------|
+| Search specific project docs | `qmd search "setup" -c myproject` |
+| Exclude archived content | `qmd search "current" -c active-docs` |
+| Search meeting notes only | `qmd search "Q1 planning" -c meetings` |
+| Multiple related collections | `qmd search "api" -c docs -c examples` |
+| Isolate personal vs work | `qmd search "todo" -c personal` |
+
+## Result Limits
+
+Control how many results are returned.
+
+### Default Limits
+
+Different formats have different default limits optimized for their use case:
+
+| Format | Default | Override |
+|--------|---------|----------|
+| CLI (default) | 5 | `-n 10` |
+| `--json` | 20 | `-n 50` |
+| `--files` | 20 | `-n 100` |
+| `--csv` | 5 | `-n 30` |
+| `--md` | 5 | `-n 15` |
+| `--xml` | 5 | `-n 25` |
+
+### Specify Exact Limit
+
+Use `-n <number>` to set a custom limit:
+
+```bash
+qmd search "error" -n 10        # Return top 10 results
+qmd search "config" -n 1        # Single best match
+qmd query "auth" -n 50 --json   # 50 results in JSON
+qmd vsearch "guide" -n 3        # Top 3 vector matches
+```
+
+**Example:**
+```bash
+$ qmd search "deployment" -n 2
+qmd://ops/deploy.md  #a3f2c1  [0.84]
+qmd://guides/ci.md   #b5d8e9  [0.72]
+# Only 2 results shown
+```
+
+### All Results
+
+Use `--all` to return all matching documents (up to 100,000):
+
+```bash
+qmd search "TODO" --all
+qmd search "error" --all --files
+qmd query "config" --all --min-score 0.5
+```
+
+**Important:** `--all` returns ALL matches, which can be thousands of results. Use with `--min-score` to filter:
+
+```bash
+# Get all high-quality matches
+qmd search "deployment" --all --min-score 0.7 --files
+
+# Export everything for analysis
+qmd search "api" --all --json > all-api-docs.json
+```
+
+### Multi-Get Limits
+
+For `multi-get`, `-l` limits **lines per file**, not number of files:
+
+```bash
+qmd multi-get "*.md" -l 50              # First 50 lines of each file
+qmd multi-get "logs/*.md" -l 10 --json  # First 10 lines, JSON format
+```
+
+All matching files are returned (no `-n` limit), but content is truncated:
+
+```bash
+$ qmd multi-get "notes/*.md" -l 5
+============================================================
+File: qmd://notes/meeting.md
+============================================================
+1: # Team Meeting
+2: 
+3: Date: 2024-01-15
+4: 
+5: ## Attendees
+
+[... truncated 45 more lines]
+```
+
+## Score Thresholds
+
+Filter results by minimum relevance score using `--min-score`.
+
+### Default Thresholds
+
+Different search commands have different defaults:
+
+| Command | Default | Reason |
+|---------|---------|--------|
+| `search` (BM25) | 0 | Accept all keyword matches |
+| `vsearch` (vector) | 0.3 | Filter low-similarity vectors |
+| `query` (hybrid) | 0 | Reranker provides quality signal |
+
+### Set Custom Threshold
+
+Specify minimum score (0-1 scale):
+
+```bash
+qmd search "config" --min-score 0.5   # Only scores ≥ 0.5
+qmd vsearch "guide" --min-score 0.7   # High similarity only
+qmd query "auth" --min-score 0.6      # Medium-high relevance
+```
+
+**Example output:**
+```bash
+$ qmd search "deployment" --min-score 0.7
+qmd://ops/deploy.md  #a3f2c1  [0.84]  ✓
+qmd://guides/ci.md   #b5d8e9  [0.72]  ✓
+# Results with score < 0.7 filtered out
+```
+
+### Understanding Scores
+
+**BM25 scores (search):**
+- Unbounded, typically 0-10 range
+- Higher = more keyword matches and better TF-IDF
+- Normalized to 0-1 for display
+- No score → No threshold by default
+
+**Vector scores (vsearch):**
+- 0-1 range (cosine similarity)
+- 1.0 = identical embeddings
+- 0.0 = completely unrelated
+- Default threshold: 0.3
+
+**Hybrid scores (query):**
+- 0-1 range (reranker confidence)
+- Combines BM25 + vector + reranking
+- Higher = model is more confident
+- No default threshold (reranker already filters)
+
+### Best Practices
+
+| Use Case | Threshold |
+|----------|-----------|
+| Find exact matches only | `--min-score 0.8` |
+| High-quality results | `--min-score 0.6` |
+| Exploratory search | `--min-score 0.3` |
+| Recall (find everything) | `--min-score 0` (default) |
+| Precision (high accuracy) | `--min-score 0.7` |
+
+### Combine with --all
+
+Get all high-scoring results:
+
+```bash
+# All docs scoring above 0.7
+qmd search "security" --all --min-score 0.7
+
+# All similar documents
+qmd vsearch "authentication flow" --all --min-score 0.5
+
+# Export high-confidence results
+qmd query "error handling" --all --min-score 0.6 --json > errors.json
+```
+
+Without `--min-score`, `--all` could return thousands of low-quality matches.
+
+## Output Modifiers
+
+Additional options that affect what content is returned.
+
+### Full Content
+
+Show complete documents instead of snippets (search only):
+
+```bash
+qmd search "deploy" --full
+qmd query "auth" --full --md
+qmd vsearch "guide" --full --json
+```
+
+**Without --full (default):**
+```
+qmd://docs/deploy.md  #a3f2c1  [0.84]
+────────────────────────────────────────────────
+...deployment process uses GitHub Actions which
+automatically builds and deploys to staging...
+```
+
+**With --full:**
+```
+qmd://docs/deploy.md  #a3f2c1  [0.84]
+────────────────────────────────────────────────
+# Deployment Guide
+
+## Overview
+
+Our deployment process uses GitHub Actions...
+
+## Staging Environment
+
+Staging deploys happen automatically...
+
+[entire document shown]
+```
+
+**Use cases:**
+- Get complete context for LLM prompts
+- Export full documents for analysis
+- Review entire files matching search
+- Generate documentation from search results
+
+### Line Numbers
+
+Add line numbers to all output:
+
+```bash
+qmd search "error" --line-numbers
+qmd get readme.md --line-numbers
+qmd multi-get "*.md" --line-numbers
+```
+
+**Example output:**
+```
+1: # Error Handling
+2: 
+3: All errors inherit from BaseError class.
+4: Custom exceptions are defined in errors.py
+5: 
+6: ## Exception Types
+```
+
+**Line numbers are added to:**
+- Search snippets
+- Full document content (`--full`)
+- Single document retrieval (`get`)
+- Multi-get file content
+- All output formats (JSON, CSV, Markdown, XML, CLI)
+
+**Example with JSON:**
+```json
+{
+  "snippet": "42: def handle_error(e):\n43:     logger.error(e)\n44:     raise CustomError(e)"
+}
+```
+
+### Line Slicing (Get Command)
+
+Retrieve specific line ranges from a document:
+
+```bash
+# Start from line 10, show 5 lines
+qmd get readme.md --from 10 -l 5
+
+# Shorthand: path:line syntax
+qmd get readme.md:10 -l 5
+qmd get qmd://docs/api.md:100 -l 20
+```
+
+**Example:**
+```bash
+$ qmd get readme.md:5 -l 3
+## Installation
+
+Run `npm install` to install dependencies.
+```
+
+Starts at line 5, shows 3 lines (lines 5-7).
+
+## Multi-Get Size Limits
+
+Control maximum file size for batch retrieval:
+
+```bash
+qmd multi-get "*.md" --max-bytes 50000   # Skip files > 50KB
+qmd multi-get "logs/*.md" --max-bytes 1000000  # 1MB limit
+```
+
+**Default:** 10,240 bytes (10KB)
+
+**Skipped files are reported in output:**
+
+```bash
+$ qmd multi-get "*.md" --max-bytes 5000
+============================================================
+File: qmd://docs/small.md
+============================================================
+[content shown]
+
+============================================================
+File: qmd://docs/large.md
+============================================================
+[SKIPPED: File too large (15KB > 5KB). Use 'qmd get qmd://docs/large.md' to retrieve.]
+```
+
+**Formats handle skipped files differently:**
+- CLI: `[SKIPPED: reason]`
+- JSON: `{"skipped": true, "reason": "..."}`
+- CSV: `true` in skipped column
+- Markdown: `> reason` (blockquote)
+- XML: `<skipped>true</skipped><reason>...</reason>`
+- Files: `[SKIPPED]` suffix
+
+**Why size limits?**
+- Prevent overwhelming terminal output
+- Keep JSON payloads reasonable
+- Avoid processing huge log files
+- Make CSV exports manageable
+
+**Retrieve large files individually:**
+```bash
+qmd get qmd://docs/huge-file.md  # No size limit
+```
+
+## Combining Filters
+
+Stack multiple filters for precise results:
+
+### Collection + Score + Limit
+```bash
+qmd search "authentication" -c docs --min-score 0.7 -n 10
+# Docs collection, score ≥ 0.7, max 10 results
+```
+
+### Multiple Collections + All + Score
+```bash
+qmd query "deploy" -c ops -c guides --all --min-score 0.6
+# Both collections, all results, score ≥ 0.6
+```
+
+### Collection + Full + Format
+```bash
+qmd search "config" -c backend --full --json -n 5
+# Backend collection, full docs, JSON, 5 results
+```
+
+### Line Numbers + Full + Limit
+```bash
+qmd search "error" --line-numbers --full -n 3
+# Top 3 results, full content with line numbers
+```
+
+## Common Filter Patterns
+
+### Find Best Match
+```bash
+qmd search "deployment guide" -n 1
+qmd query "how to authenticate" -n 1 --min-score 0.8
+```
+
+### High-Quality Results Only
+```bash
+qmd search "security" --min-score 0.7 -n 20
+qmd vsearch "architecture" --min-score 0.6
+```
+
+### Everything in Collection
+```bash
+qmd search "TODO" -c myproject --all
+qmd search "*" -c notes --all --files
+```
+
+### Export for Analysis
+```bash
+qmd search "error" --all --min-score 0.5 --json > errors.json
+qmd query "api" -c docs --all --csv > api-docs.csv
+```
+
+### Preview Multiple Docs
+```bash
+qmd multi-get "guides/*.md" -l 20
+qmd multi-get "*.md" --max-bytes 5000 -l 10
+```
+
+### Specific Collection Slice
+```bash
+qmd search "config" -c backend -n 5 --full --md
+qmd query "auth flow" -c api-docs --min-score 0.7 -n 3
+```
+
+## Performance Tips
+
+1. **Use collection filters** when possible - searching 1 collection is faster than 10
+2. **Set reasonable limits** - `-n 10` is faster than `--all` for exploration
+3. **Add score thresholds** - `--min-score 0.5` filters before ranking
+4. **Limit line counts** - `multi-get` with `-l 50` loads less data
+5. **Use --files** - minimal format for quick scans
+
+## Filter Precedence
+
+Filters are applied in this order:
+
+1. **Collection filter** (`-c`) - narrows search scope
+2. **Search/query** - finds matching documents
+3. **Score threshold** (`--min-score`) - filters by relevance
+4. **Limit** (`-n` or `--all`) - caps result count
+5. **Content modifiers** (`--full`, `--line-numbers`) - affects output format
+
+## See Also
+
+- [Output Formats](/cli/output-formats) - JSON, CSV, Markdown, XML, Files reference
+- [Search Commands](/cli/search) - Search, query, and vsearch details
+- [Collections](/concepts/collections) - Managing collections and includeByDefault
+- [Virtual Paths](/concepts/collections#virtual-paths) - Understanding qmd:// URIs

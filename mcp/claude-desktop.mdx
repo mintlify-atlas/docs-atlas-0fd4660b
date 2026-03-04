@@ -1,0 +1,133 @@
+---
+title: Claude Desktop
+description: Configure QMD MCP server for Claude Desktop
+---
+
+## Overview
+
+QMD integrates with Claude Desktop via the Model Context Protocol (MCP), providing six search and retrieval tools directly in your Claude Desktop conversations.
+
+## Configuration
+
+Add QMD to your Claude Desktop configuration file.
+
+<Steps>
+  <Step title="Locate the configuration file">
+    The configuration file is located at:
+    
+    ```
+    ~/Library/Application Support/Claude/claude_desktop_config.json
+    ```
+    
+    On macOS, this expands to:
+    ```
+    /Users/[username]/Library/Application Support/Claude/claude_desktop_config.json
+    ```
+  </Step>
+
+  <Step title="Add QMD server configuration">
+    Edit the JSON file to add QMD under `mcpServers`:
+    
+    ```json
+    {
+      "mcpServers": {
+        "qmd": {
+          "command": "qmd",
+          "args": ["mcp"]
+        }
+      }
+    }
+    ```
+    
+    If you already have other MCP servers configured, add the `qmd` entry alongside them:
+    
+    ```json
+    {
+      "mcpServers": {
+        "filesystem": {
+          "command": "npx",
+          "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/files"]
+        },
+        "qmd": {
+          "command": "qmd",
+          "args": ["mcp"]
+        }
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Restart Claude Desktop">
+    Completely quit and restart Claude Desktop for the configuration to take effect.
+  </Step>
+
+  <Step title="Verify the integration">
+    In a new conversation, ask Claude to check the QMD index status:
+    
+    ```
+    What's the status of my QMD index?
+    ```
+    
+    Claude should use the `status` tool to show your collections and document count.
+  </Step>
+</Steps>
+
+## Transport Mode
+
+The configuration above uses **stdio transport** (standard input/output). Each time Claude Desktop starts a conversation, it launches `qmd mcp` as a subprocess.
+
+### Stdio vs HTTP
+
+- **Stdio** (default): Simple, no daemon management required. QMD process starts when Claude needs it.
+- **HTTP**: Shared daemon stays running. Models stay loaded in memory. See [HTTP Transport](/mcp/http-transport) for setup.
+
+## Available Tools
+
+Once configured, Claude can use these QMD tools:
+
+- `query` — Deep search with sub-queries (lex/vec/hyde)
+- `get` — Retrieve document by path or docid
+- `multi_get` — Batch retrieve by glob pattern
+- `status` — Index health and collections
+
+Claude also has read access to documents via `qmd://` URIs.
+
+## Troubleshooting
+
+### QMD not showing up
+
+1. Verify `qmd` is installed and in your PATH:
+   ```bash
+   which qmd
+   qmd --version
+   ```
+
+2. Check the JSON syntax is valid (no trailing commas, proper quotes)
+
+3. Look for errors in Claude Desktop's logs (Help > View Logs)
+
+### "Command not found" errors
+
+If Claude Desktop can't find the `qmd` command, use the full path:
+
+```json
+{
+  "mcpServers": {
+    "qmd": {
+      "command": "/usr/local/bin/qmd",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Find the path with:
+```bash
+which qmd
+```
+
+## Next Steps
+
+- [Claude Code Configuration](/mcp/claude-code)
+- [HTTP Transport Mode](/mcp/http-transport)
+- [Search Tools Reference](/cli/search)

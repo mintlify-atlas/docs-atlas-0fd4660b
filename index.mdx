@@ -1,97 +1,182 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: QMD Documentation
+description: On-device hybrid search for markdown files with BM25, vector search, and LLM reranking
 ---
 
-## Setting up
+<div className="relative overflow-hidden bg-gradient-to-b from-[#020627] to-[#0a0f2e] dark:from-[#020627] dark:to-[#0a0f2e] py-20">
+  <div className="max-w-7xl mx-auto px-6 lg:px-8">
+    <div className="text-center">
+      <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold text-white mb-6">
+        Search Your Knowledge Base Locally
+      </h1>
+      <p className="text-lg sm:text-xl text-gray-300 dark:text-gray-300 max-w-2xl mx-auto mb-10">
+        QMD combines BM25 full-text search, vector semantic search, and LLM reranking—all running on-device with GGUF models. Index your markdown notes, documentation, and knowledge bases with zero external dependencies.
+      </p>
+      <div className="flex flex-col sm:flex-row gap-4 justify-center items-center flex-wrap">
+        <a
+          href="/quickstart"
+          className="inline-block bg-[#238636] hover:bg-[#2ea043] text-white font-semibold py-3 px-6 rounded-lg transition-colors no-underline"
+        >
+          Get Started
+        </a>
+        <a
+          href="/concepts/search-modes"
+          className="inline-block border border-white/30 bg-white/10 hover:bg-white/20 text-white font-semibold py-3 px-6 rounded-lg transition-colors no-underline"
+        >
+          Explore Search Modes
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
 
-Get your documentation site up and running in minutes.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-4">Quick Start</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Get QMD running in minutes with these simple steps
+  </p>
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+  <Steps>
+    <Step title="Install QMD">
+      Install globally via npm or bun:
+      
+      ```bash
+      npm install -g @tobilu/qmd
+      # or
+      bun install -g @tobilu/qmd
+      ```
+    </Step>
 
-## Make it yours
+    <Step title="Create a collection">
+      Index your markdown files by creating a collection:
+      
+      ```bash
+      qmd collection add ~/notes --name notes
+      qmd collection add ~/Documents/meetings --name meetings
+      ```
+    </Step>
 
-Design a docs site that looks great and empowers your users.
+    <Step title="Add context">
+      Add contextual descriptions to help with search relevance:
+      
+      ```bash
+      qmd context add qmd://notes "Personal notes and ideas"
+      qmd context add qmd://meetings "Meeting transcripts and notes"
+      ```
+    </Step>
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
+    <Step title="Generate embeddings">
+      Create vector embeddings for semantic search:
+      
+      ```bash
+      qmd embed
+      ```
+      
+      <Note>Models are auto-downloaded on first use (~2GB total). They're cached in `~/.cache/qmd/models/`</Note>
+    </Step>
 
-## Create beautiful pages
+    <Step title="Search your content">
+      Use any of the three search modes:
+      
+      ```bash
+      qmd search "project timeline"           # Fast keyword search
+      qmd vsearch "how to deploy"             # Semantic search
+      qmd query "quarterly planning process"  # Hybrid + reranking
+      ```
+    </Step>
+  </Steps>
+</div>
 
-Everything you need to create world-class documentation.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-4">Explore by topic</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Learn about QMD's core features and capabilities
+  </p>
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+  <CardGroup cols={2}>
+    <Card title="Collections" icon="folder-open" href="/concepts/collections">
+      Organize and index your markdown files into searchable collections
+    </Card>
+    <Card title="Search modes" icon="magnifying-glass" href="/concepts/search-modes">
+      Choose between BM25, vector, or hybrid search with reranking
+    </Card>
+    <Card title="Query syntax" icon="code" href="/concepts/query-syntax">
+      Write structured queries with typed sub-queries for precise results
+    </Card>
+    <Card title="Context management" icon="sitemap" href="/concepts/context">
+      Add hierarchical metadata to improve search relevance
+    </Card>
+    <Card title="AI agents" icon="robot" href="/guides/ai-agents">
+      Integrate QMD with AI workflows using JSON and file outputs
+    </Card>
+    <Card title="MCP server" icon="server" href="/guides/mcp-server">
+      Expose QMD as an MCP server for Claude and other AI tools
+    </Card>
+  </CardGroup>
+</div>
 
-## Need inspiration?
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-4">Key features</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">
+    Everything you need for powerful local search
+  </p>
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <div className="bg-gray-50 dark:bg-[#1a1d27] border border-gray-200 dark:border-[#27272a] rounded-xl p-6">
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Hybrid search pipeline</h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Combines BM25 full-text search with vector semantic search, then applies LLM reranking for optimal results
+      </p>
+    </div>
+
+    <div className="bg-gray-50 dark:bg-[#1a1d27] border border-gray-200 dark:border-[#27272a] rounded-xl p-6">
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">100% local execution</h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        All models run on-device via node-llama-cpp. No API keys, no external dependencies, no data leaving your machine
+      </p>
+    </div>
+
+    <div className="bg-gray-50 dark:bg-[#1a1d27] border border-gray-200 dark:border-[#27272a] rounded-xl p-6">
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Smart chunking</h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Markdown-aware boundary detection keeps sections intact. 900 tokens per chunk with 15% overlap
+      </p>
+    </div>
+
+    <div className="bg-gray-50 dark:bg-[#1a1d27] border border-gray-200 dark:border-[#27272a] rounded-xl p-6">
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Document IDs (docid)</h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Every document gets a short hash ID for quick reference. Use them in search results and retrieval commands
+      </p>
+    </div>
+
+    <div className="bg-gray-50 dark:bg-[#1a1d27] border border-gray-200 dark:border-[#27272a] rounded-xl p-6">
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Query document format</h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Write multi-line queries with typed sub-queries (lex, vec, hyde) for precise control over search strategy
+      </p>
+    </div>
+
+    <div className="bg-gray-50 dark:bg-[#1a1d27] border border-gray-200 dark:border-[#27272a] rounded-xl p-6">
+      <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Multiple output formats</h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400">
+        Export results as JSON, CSV, Markdown, XML, or plain file lists for integration with AI agents and scripts
+      </p>
+    </div>
+  </div>
+</div>
+
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="bg-gray-50 dark:bg-[#1a1d27] border border-gray-200 dark:border-[#27272a] rounded-xl p-8 text-center">
+    <h2 className="text-2xl sm:text-3xl font-semibold text-gray-900 dark:text-white mb-4">Ready to get started?</h2>
+    <p className="text-base text-gray-600 dark:text-gray-400 mb-6 max-w-2xl mx-auto">
+      Install QMD and start searching your knowledge base in minutes
+    </p>
+    <a
+      href="/installation"
+      className="inline-block bg-[#238636] hover:bg-[#2ea043] text-white font-semibold py-3 px-6 rounded-lg transition-colors no-underline"
+    >
+      View Installation Guide
+    </a>
+  </div>
+</div>

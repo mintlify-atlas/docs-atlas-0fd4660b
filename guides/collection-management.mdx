@@ -1,0 +1,289 @@
+---
+title: Collection Management
+description: Managing indexed directories, filtering, and update commands
+---
+
+Collections are the directories you index with QMD. Each collection has a name, path, glob pattern, and optional contexts.
+
+## Adding Collections
+
+Create a collection to index markdown files in a directory:
+
+<CodeGroup>
+```bash Current Directory
+qmd collection add . --name myproject
+```
+
+```bash Custom Path
+qmd collection add ~/Documents/notes --name notes
+```
+
+```bash Custom Glob Pattern
+qmd collection add ~/work/docs --name docs --mask "**/*.{md,txt}"
+```
+</CodeGroup>
+
+<Note>
+The default glob pattern is `**/*.md`, which indexes all markdown files recursively while excluding common directories like `node_modules`, `.git`, `.cache`, `vendor`, `dist`, and `build`.
+</Note>
+
+### Collection Naming
+
+If you don't specify `--name`, QMD uses the directory basename:
+
+```bash
+qmd collection add ~/Documents/meeting-notes
+# Creates collection named "meeting-notes"
+```
+
+Collection names must contain only alphanumeric characters, hyphens, and underscores (`a-zA-Z0-9_-`).
+
+## Listing Collections
+
+View all indexed collections:
+
+```bash
+qmd collection list
+```
+
+**Example output:**
+
+```
+Collections (3):
+
+notes (qmd://notes/)
+  Pattern:  **/*.md
+  Files:    142
+  Updated:  2h ago
+
+meetings (qmd://meetings/) [excluded]
+  Pattern:  **/*.md
+  Files:    67
+  Updated:  1d ago
+
+docs (qmd://docs/)
+  Pattern:  **/*.md
+  Files:    89
+  Updated:  3h ago
+```
+
+<Note>
+The `[excluded]` tag means this collection is not searched by default unless explicitly specified with `-c` or `--collection`.
+</Note>
+
+## Removing Collections
+
+Remove a collection and all its indexed documents:
+
+```bash
+qmd collection remove notes
+```
+
+**Example output:**
+
+```
+✓ Removed collection 'notes'
+  Deleted 142 documents
+  Cleaned up 98 orphaned content hashes
+```
+
+<Warning>
+Removing a collection deletes all document records and embeddings from the index. The source files remain untouched.
+</Warning>
+
+## Renaming Collections
+
+Change a collection's name:
+
+```bash
+qmd collection rename notes personal-notes
+```
+
+Virtual paths are automatically updated:
+
+```
+✓ Renamed collection 'notes' to 'personal-notes'
+  Virtual paths updated: qmd://notes/ → qmd://personal-notes/
+```
+
+## Listing Files in a Collection
+
+Browse files in a collection:
+
+<CodeGroup>
+```bash All Files
+qmd ls notes
+```
+
+```bash With Path Prefix
+qmd ls notes/2025
+qmd ls qmd://notes/2025
+```
+
+```bash List All Collections
+qmd ls
+```
+</CodeGroup>
+
+**Example output:**
+
+```
+ 12.3 KB  Jan 15 09:30  qmd://notes/meeting-2025-01-15.md
+  8.7 KB  Jan 14 14:22  qmd://notes/ideas/product-roadmap.md
+  4.2 KB  Jan 13 11:05  qmd://notes/retrospective.md
+```
+
+## Include/Exclude Filtering
+
+Control which collections are searched by default:
+
+### Excluding a Collection
+
+Mark a collection as excluded from default searches:
+
+```bash
+qmd collection exclude meetings
+```
+
+Excluded collections are only searched when explicitly specified:
+
+```bash
+# Searches only 'meetings' collection
+qmd search "standup" -c meetings
+
+# Searches all non-excluded collections
+qmd search "standup"
+```
+
+### Including a Collection
+
+Re-enable a previously excluded collection:
+
+```bash
+qmd collection include meetings
+```
+
+<Note>
+Collections are included by default when created. Use exclusion for archives, deprecated content, or collections you only want to search explicitly.
+</Note>
+
+## Update Commands
+
+Automate collection updates with custom bash commands. Useful for git repos or synced directories.
+
+### Setting an Update Command
+
+<CodeGroup>
+```bash Git Pull
+qmd collection update-cmd brain 'git pull --rebase'
+```
+
+```bash Git with Stash
+qmd collection update-cmd notes 'git stash && git pull --rebase --ff-only && git stash pop'
+```
+
+```bash Rsync
+qmd collection update-cmd archive 'rsync -av remote:/backups/ .'
+```
+</CodeGroup>
+
+Update commands run in the collection's directory before re-indexing.
+
+### Removing an Update Command
+
+```bash
+qmd collection update-cmd notes
+```
+
+Omit the command argument to clear it.
+
+### Running Updates
+
+Update all collections (runs custom commands if configured):
+
+```bash
+qmd update
+```
+
+**Example output:**
+
+```
+Updating 3 collection(s)...
+
+[1/3] brain (**/*.md)
+    Running update command: git pull --rebase
+    Already up to date.
+Collection: /home/user/brain (**/*.md)
+Indexed 245 files (89 new, 12 updated, 144 unchanged)
+Completed in 2.1s
+
+[2/3] notes (**/*.md)
+Collection: /home/user/notes (**/*.md)
+Indexed 67 files (3 new, 1 updated, 63 unchanged)
+Completed in 0.8s
+
+✓ All collections updated.
+
+Run 'qmd embed' to update embeddings (15 unique hashes need vectors)
+```
+
+## Collection Configuration Storage
+
+Collections are stored in `~/.config/qmd/index.yml`:
+
+```yaml
+collections:
+  notes:
+    path: /home/user/Documents/notes
+    pattern: "**/*.md"
+    context:
+      "/": "Personal notes and ideas"
+      "/work": "Work-related notes"
+    update: "git pull --rebase"
+  
+  meetings:
+    path: /home/user/Documents/meetings
+    pattern: "**/*.md"
+    includeByDefault: false
+    context:
+      "/": "Meeting transcripts and notes"
+```
+
+<Note>
+Manually editing `index.yml` is supported but use the CLI commands when possible to avoid syntax errors.
+</Note>
+
+## Virtual Paths
+
+Each collection has a virtual path namespace:
+
+- Collection root: `qmd://notes/`
+- Files within: `qmd://notes/path/to/file.md`
+
+Virtual paths work with all QMD commands:
+
+```bash
+qmd get qmd://notes/meeting.md
+qmd multi-get "qmd://notes/2025-*.md"
+qmd context add qmd://notes/work "Work notes"
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Organize by domain">
+    Create separate collections for different knowledge domains (personal notes, work docs, research papers, etc.) for better context and filtering.
+  </Step>
+  
+  <Step title="Add update commands">
+    Configure git pull or sync commands for collections that change frequently.
+  </Step>
+  
+  <Step title="Use exclusion strategically">
+    Exclude large archives or reference material that you rarely search. Access them explicitly when needed with `-c collection-name`.
+  </Step>
+  
+  <Step title="Add context metadata">
+    Use `qmd context add` to describe what each collection contains. This dramatically improves search relevance. See [Context Management](/concepts/context).
+  </Step>
+</Steps>

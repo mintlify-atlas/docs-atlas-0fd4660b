@@ -1,0 +1,412 @@
+---
+title: Search Modes
+description: Understanding QMD's three search modes and when to use each
+---
+
+QMD provides three search modes, each with different tradeoffs between speed, quality, and resource usage:
+
+| Mode | Speed | Quality | Use Case |
+|------|-------|---------|----------|
+| **search** | Fast (~10ms) | Good | Keyword matching, exact terms |
+| **vsearch** | Medium (~100ms) | Better | Semantic similarity, questions |
+| **query** | Slow (~1-2s) | Best | High-quality results, LLM integration |
+
+## search - BM25 Keyword Search
+
+Fast full-text search using SQLite FTS5 with BM25 ranking. No LLM or embedding lookup required.
+
+```bash
+qmd search "authentication flow"
+```
+
+### How It Works
+
+1. Parses query into FTS5 syntax
+2. Searches **documents_fts** table (full-text index)
+3. Ranks results using BM25 algorithm
+4. Returns top N results (default: 5)
+
+### Performance
+
+- **Speed**: ~10-50ms
+- **No GPU required**
+- **No embeddings required**
+
+### When to Use
+
+<AccordionGroup>
+
+<Accordion title="Keyword matching">
+When you know specific terms that appear in documents:
+
+```bash
+qmd search "OAuth 2.0"
+qmd search "CAP theorem"
+```
+</Accordion>
+
+<Accordion title="Exact phrase matching">
+Use quotes for exact phrases:
+
+```bash
+qmd search '"machine learning"'
+qmd search '"error handling best practices"'
+```
+</Accordion>
+
+<Accordion title="Exclusions">
+Exclude terms with `-`:
+
+```bash
+qmd search "auth -oauth -saml"
+qmd search '"machine learning" -"deep learning"'
+```
+</Accordion>
+
+<Accordion title="Fast preliminary search">
+When you need instant results and semantic understanding isn't critical.
+</Accordion>
+
+</AccordionGroup>
+
+### Lex Query Syntax
+
+The `search` command uses **lex** (lexical) query syntax:
+
+| Syntax | Meaning | Example |
+|--------|---------|----------|
+| `word` | Prefix match | `perf` matches "performance" |
+| `"phrase"` | Exact phrase | `"rate limiter"` |
+| `-word` | Exclude term | `-sports` |
+| `-"phrase"` | Exclude phrase | `-"test data"` |
+
+<CodeGroup>
+
+```bash Prefix Match
+qmd search "auth"  # Matches: auth, authentication, authorize
+```
+
+```bash Exact Phrase
+qmd search '"rate limiter"'  # Only matches exact phrase
+```
+
+```bash Exclusion
+qmd search "performance -optimization"  # Exclude "optimization"
+```
+
+```bash Combined
+qmd search '"machine learning" -"deep learning" neural'
+```
+
+</CodeGroup>
+
+### Limitations
+
+- No semantic understanding ("auth" won't match "login")
+- Requires knowing exact terminology
+- Prefix matching can return false positives
+
+## vsearch - Vector Semantic Search
+
+Semantic similarity search using embeddings and cosine distance. Better at understanding intent than keyword search.
+
+```bash
+qmd vsearch "how does authentication work"
+```
+
+### How It Works
+
+1. Embeds query using **embeddinggemma-300M** model
+2. Searches **vectors_vec** table (vector index)
+3. Computes cosine distance to all document chunks
+4. Returns top N results (default: 5)
+
+### Performance
+
+- **Speed**: ~50-200ms (depends on index size and GPU)
+- **Requires**: Embeddings (`qmd embed`)
+- **GPU**: Accelerates embedding generation
+
+### When to Use
+
+<AccordionGroup>
+
+<Accordion title="Natural language questions">
+When searching with questions or descriptions:
+
+```bash
+qmd vsearch "how to handle rate limiting"
+qmd vsearch "what is the difference between consistency and availability"
+```
+</Accordion>
+
+<Accordion title="Semantic similarity">
+When you don't know exact terms but understand the concept:
+
+```bash
+qmd vsearch "authentication"  # Finds: login, OAuth, SSO, credentials
+qmd vsearch "distributed systems"  # Finds: CAP theorem, consensus, replication
+```
+</Accordion>
+
+<Accordion title="Cross-lingual understanding">
+Embeddings can match concepts across different phrasings:
+
+```bash
+qmd vsearch "user login"  # Matches: authentication, sign-in, credentials
+```
+</Accordion>
+
+<Accordion title="Fast semantic search">
+When you need semantic understanding but don't need reranking or query expansion.
+</Accordion>
+
+</AccordionGroup>
+
+### Vec Query Format
+
+Vector queries are plain natural language — no special syntax:
+
+```bash
+qmd vsearch "how does the rate limiter handle burst traffic"
+qmd vsearch "what is the tradeoff between consistency and availability"
+```
+
+<Warning>
+Vector queries **do not support** lex syntax like `-term` or `"exact phrase"`. Use `search` for exclusions.
+</Warning>
+
+### Limitations
+
+- Requires running `qmd embed` first
+- No query expansion (single embedding only)
+- No LLM reranking (may miss nuance)
+- Results not optimized for best-first ordering
+
+## query - Hybrid Search with Reranking
+
+Highest quality search combining BM25, vector search, query expansion, and LLM reranking. Recommended for most use cases.
+
+```bash
+qmd query "user authentication process"
+```
+
+### How It Works
+
+```
+Query ──► LLM Expansion ──► [Original, Variant 1]
+              │
+    ┌─────────┴─────────┐
+    ▼                   ▼
+ BM25 Search      Vector Search
+    │                   │
+    └─────────┬─────────┘
+              ▼
+    RRF Fusion (k=60)
+    Original query ×2 weight
+    Top-rank bonus: +0.05
+              │
+              ▼
+    Top 30 candidates
+              │
+              ▼
+    LLM Re-ranking
+    (qwen3-reranker)
+              │
+              ▼
+  Position-Aware Blend
+  Rank 1-3:  75% RRF / 25% reranker
+  Rank 4-10: 60% RRF / 40% reranker
+  Rank 11+:  40% RRF / 60% reranker
+              │
+              ▼
+    Final Results
+```
+
+### Pipeline Stages
+
+<Steps>
+
+<Step title="Query Expansion">
+LLM generates alternative query phrasings using **qmd-query-expansion-1.7B** model.
+
+Original query gets 2× weight in fusion to preserve exact matches.
+</Step>
+
+<Step title="Parallel Retrieval">
+Each query variation searches:
+- **FTS (BM25)**: Keyword matching
+- **Vector**: Semantic similarity
+</Step>
+
+<Step title="RRF Fusion">
+Combines all results using Reciprocal Rank Fusion:
+
+```
+score = Σ(1 / (k + rank + 1))  where k=60
+```
+
+Top-ranked documents get bonus:
+- Rank #1: +0.05
+- Rank #2-3: +0.02
+</Step>
+
+<Step title="Candidate Selection">
+Top 30 candidates proceed to reranking (balances quality vs latency).
+</Step>
+
+<Step title="LLM Reranking">
+**qwen3-reranker-0.6b** scores each document for relevance (0.0-1.0).
+</Step>
+
+<Step title="Position-Aware Blending">
+Blends retrieval and reranker scores based on position:
+
+| Rank | Retrieval Weight | Reranker Weight |
+|------|------------------|------------------|
+| 1-3  | 75% | 25% |
+| 4-10 | 60% | 40% |
+| 11+  | 40% | 60% |
+
+This prevents the reranker from demoting strong exact matches.
+</Step>
+
+</Steps>
+
+### Performance
+
+- **Speed**: ~500ms-2s (depends on GPU and query complexity)
+- **Requires**: Embeddings (`qmd embed`) and GPU for best performance
+- **Models**: 3 GGUF models (~2GB total)
+
+### When to Use
+
+<AccordionGroup>
+
+<Accordion title="Best-quality results">
+When you need the most relevant results and can afford the latency:
+
+```bash
+qmd query "how does the authentication system work"
+```
+</Accordion>
+
+<Accordion title="LLM integration">
+When feeding results to an LLM (via MCP or CLI):
+
+```bash
+qmd query "API design patterns" --json
+```
+</Accordion>
+
+<Accordion title="Complex questions">
+When queries need understanding and expansion:
+
+```bash
+qmd query "what are the tradeoffs between consistency and availability"
+```
+</Accordion>
+
+<Accordion title="Recall-critical searches">
+When missing relevant documents is worse than higher latency.
+</Accordion>
+
+</AccordionGroup>
+
+### Score Interpretation
+
+| Score | Meaning |
+|-------|----------|
+| 0.8 - 1.0 | Highly relevant |
+| 0.5 - 0.8 | Moderately relevant |
+| 0.2 - 0.5 | Somewhat relevant |
+| 0.0 - 0.2 | Low relevance |
+
+Use `--min-score` to filter results:
+
+```bash
+qmd query "error handling" --all --min-score 0.4
+```
+
+## Choosing the Right Mode
+
+<CardGroup cols={3}>
+
+<Card title="search" icon="magnifying-glass">
+**Use when:**
+- You know exact keywords
+- Speed is critical (&lt;50ms)
+- No embeddings available
+
+**Example:** `qmd search "OAuth 2.0"`
+</Card>
+
+<Card title="vsearch" icon="brain">
+**Use when:**
+- Natural language queries
+- Semantic understanding needed
+- Fast results (&lt;200ms)
+
+**Example:** `qmd vsearch "how to authenticate"`
+</Card>
+
+<Card title="query" icon="sparkles">
+**Use when:**
+- Best quality required
+- LLM integration
+- Complex questions
+
+**Example:** `qmd query "authentication best practices"`
+</Card>
+
+</CardGroup>
+
+## Common Options
+
+All search modes support these options:
+
+```bash
+-n <num>           # Number of results (default: 5, or 20 for --files/--json)
+-c, --collection   # Filter to specific collection
+--all              # Return all matches (use with --min-score)
+--min-score <num>  # Minimum score threshold (default: 0)
+--full             # Show full document content
+--line-numbers     # Add line numbers to output
+--json             # JSON output
+--files            # File list format (docid,score,filepath,context)
+```
+
+<CodeGroup>
+
+```bash Collection Filter
+qmd search "API" -c docs
+qmd vsearch "authentication" --collection notes
+qmd query "error handling" -c docs
+```
+
+```bash Score Threshold
+qmd query "API design" --all --min-score 0.3
+```
+
+```bash JSON Output
+qmd query "authentication" --json -n 10
+```
+
+</CodeGroup>
+
+## Advanced: Structured Queries
+
+For maximum control, use [Query Syntax](/concepts/query-syntax) to specify multiple query types:
+
+```bash
+qmd query $'lex: rate limiter algorithm\nvec: how does rate limiting work\nhyde: The API uses a token bucket algorithm...'
+```
+
+See [Query Syntax](/concepts/query-syntax) for details.
+
+## Related
+
+- [Query Syntax](/concepts/query-syntax) - Advanced query document format
+- [Embeddings](/concepts/embeddings) - How vector search works
+- [MCP Server](/guides/mcp-server) - Using search modes via MCP
+- [CLI Reference](/cli/search) - Search command documentation

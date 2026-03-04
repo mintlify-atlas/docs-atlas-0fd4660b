@@ -1,0 +1,323 @@
+---
+title: HTTP Transport
+description: Run QMD MCP server as a persistent HTTP daemon
+---
+
+## Overview
+
+By default, QMD uses **stdio transport**: each MCP client launches a fresh `qmd mcp` subprocess. For frequent usage, **HTTP transport** provides a shared, long-lived daemon that keeps LLM models loaded in VRAM across requests.
+
+## When to Use HTTP
+
+Choose HTTP transport if:
+- You use QMD multiple times per day
+- You want sub-second response times (models stay loaded)
+- You use multiple MCP clients and want to share one daemon
+- You're running QMD on a remote server
+
+Stick with stdio if:
+- You use QMD occasionally
+- You prefer zero daemon management
+- You're new to QMD
+
+## Starting the HTTP Server
+
+### Foreground Mode
+
+Run the server in the current terminal (Ctrl-C to stop):
+
+```bash
+# Default port 8181
+qmd mcp --http
+
+# Custom port
+qmd mcp --http --port 8080
+```
+
+Output:
+```
+QMD MCP server listening on http://localhost:8181/mcp
+```
+
+### Background Daemon
+
+Start as a detached background process:
+
+```bash
+qmd mcp --http --daemon
+```
+
+Output:
+```
+Started on http://localhost:8181/mcp (PID 12345)
+Logs: /Users/username/.cache/qmd/mcp.log
+```
+
+The daemon:
+- Writes its process ID to `~/.cache/qmd/mcp.pid`
+- Logs to `~/.cache/qmd/mcp.log`
+- Runs detached from your terminal session
+
+## Stopping the Daemon
+
+```bash
+qmd mcp stop
+```
+
+This reads the PID from `~/.cache/qmd/mcp.pid`, sends `SIGTERM`, and cleans up the PID file.
+
+Output:
+```
+Stopped QMD MCP server (PID 12345).
+```
+
+If the daemon was already stopped:
+```
+Cleaned up stale PID file (server was not running).
+```
+
+## Checking Daemon Status
+
+```bash
+qmd status
+```
+
+If the daemon is running, you'll see:
+```
+MCP:   running (PID 12345)
+```
+
+This checks if the PID file exists and the process is alive.
+
+## HTTP Endpoints
+
+The HTTP server exposes two endpoints:
+
+### POST /mcp
+
+MCP protocol endpoint using Streamable HTTP transport (JSON responses, stateless).
+
+Clients send JSON-RPC 2.0 requests and receive structured responses.
+
+**Example MCP request:**
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "query",
+    "arguments": {
+      "searches": [{"type": "lex", "query": "authentication"}],
+      "limit": 5
+    }
+  }
+}
+```
+
+### GET /health
+
+Liveness check with uptime.
+
+**Request:**
+```bash
+curl http://localhost:8181/health
+```
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "uptime": 3600
+}
+```
+
+Use this for monitoring or health checks in orchestration systems.
+
+## PID File Location
+
+The PID file is stored in:
+```
+~/.cache/qmd/mcp.pid
+```
+
+Or, if `XDG_CACHE_HOME` is set:
+```
+$XDG_CACHE_HOME/qmd/mcp.pid
+```
+
+The file contains a single line with the process ID:
+```
+12345
+```
+
+## Model Lifecycle
+
+HTTP transport provides significant performance benefits:
+
+- **LLM models stay loaded in VRAM** across requests
+- **Embedding/reranking contexts** are disposed after 5 minutes of idle time
+- **Transparent recreation**: Disposed contexts are recreated on the next request (~1s penalty)
+- **Models themselves stay loaded** even when contexts are disposed
+
+This means:
+- First request after startup: ~2-3s (load models)
+- Subsequent requests (hot): ~100-500ms
+- Request after 5min idle: ~1-2s (recreate context, models still loaded)
+
+## Configuring Clients for HTTP
+
+To use the HTTP daemon instead of stdio, update your MCP client configuration.
+
+### Claude Desktop
+
+**Stdio (default):**
+```json
+{
+  "mcpServers": {
+    "qmd": {
+      "command": "qmd",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+**HTTP:**
+```json
+{
+  "mcpServers": {
+    "qmd": {
+      "url": "http://localhost:8181/mcp"
+    }
+  }
+}
+```
+
+### Claude Code
+
+**Stdio (default):**
+```json
+{
+  "mcpServers": {
+    "qmd": {
+      "command": "qmd",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+**HTTP:**
+```json
+{
+  "mcpServers": {
+    "qmd": {
+      "url": "http://localhost:8181/mcp"
+    }
+  }
+}
+```
+
+## Port Configuration
+
+Default port: **8181**
+
+Change with `--port`:
+```bash
+qmd mcp --http --port 8080
+qmd mcp --http --daemon --port 8080
+```
+
+If the port is already in use:
+```
+Port 8181 already in use. Try a different port with --port.
+```
+
+## Logs
+
+Daemon logs are written to:
+```
+~/.cache/qmd/mcp.log
+```
+
+Or:
+```
+$XDG_CACHE_HOME/qmd/mcp.log
+```
+
+The log file is **truncated on each daemon start** (fresh log per run).
+
+Tail the logs:
+```bash
+tail -f ~/.cache/qmd/mcp.log
+```
+
+## Troubleshooting
+
+### Port already in use
+
+**Error:**
+```
+Port 8181 already in use. Try a different port with --port.
+```
+
+**Solution:** Use a different port:
+```bash
+qmd mcp --http --port 8282
+```
+
+### Daemon won't start (already running)
+
+**Error:**
+```
+Already running (PID 12345). Run 'qmd mcp stop' first.
+```
+
+**Solution:** Stop the existing daemon:
+```bash
+qmd mcp stop
+qmd mcp --http --daemon
+```
+
+### Stale PID file
+
+If the PID file exists but the process is dead, `qmd mcp --http --daemon` will automatically clean it up and start a new daemon.
+
+### Connection refused
+
+**Error from client:**
+```
+connection refused: http://localhost:8181/mcp
+```
+
+**Check:**
+1. Is the daemon running?
+   ```bash
+   qmd status
+   ```
+
+2. Is it listening on the expected port?
+   ```bash
+   curl http://localhost:8181/health
+   ```
+
+3. Check the logs:
+   ```bash
+   cat ~/.cache/qmd/mcp.log
+   ```
+
+## Security
+
+The HTTP server **binds to localhost only** (`127.0.0.1`). It is not accessible from other machines on your network.
+
+For remote access, use SSH port forwarding:
+```bash
+ssh -L 8181:localhost:8181 user@remote-host
+```
+
+## Next Steps
+
+- [Claude Desktop Configuration](/mcp/claude-desktop)
+- [Claude Code Configuration](/mcp/claude-code)
+- [Search Tools Reference](/cli/search)

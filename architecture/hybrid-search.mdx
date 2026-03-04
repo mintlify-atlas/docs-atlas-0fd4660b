@@ -1,0 +1,355 @@
+---
+title: 'Hybrid Search Pipeline'
+description: 'Query expansion, RRF fusion, and reranking in QMD'
+---
+
+QMD's hybrid search combines BM25 keyword search, vector semantic search, query expansion, and LLM reranking to deliver high-quality results.
+
+## Query Expansion
+
+### Fine-Tuned Model
+
+QMD uses a fine-tuned 1.7B parameter model for query expansion:
+
+```
+hf:tobil/qmd-query-expansion-1.7B-gguf/qmd-query-expansion-1.7B-q4_k_m.gguf
+```
+
+The model generates typed query variants:
+
+- **lex**: Keyword variant (routes to BM25/FTS5)
+- **vec**: Semantic variant (routes to vector search)
+- **hyde**: Hypothetical document (routes to vector search)
+
+### Expansion Process
+
+```typescript
+export type Queryable = {
+  type: 'lex' | 'vec' | 'hyde';
+  text: string;
+};
+
+async function expandQuery(query: string): Promise<Queryable[]> {
+  const llm = getDefaultLlamaCpp();
+  
+  const grammar = await llama.createGrammar({
+    grammar: `
+      root ::= line+
+      line ::= type ": " content "\\n"
+      type ::= "lex" | "vec" | "hyde"
+      content ::= [^\\n]+
+    `
+  });
+
+  const prompt = `/no_think Expand this search query: ${query}`;
+  
+  const result = await session.prompt(prompt, {
+    grammar,
+    maxTokens: 600,
+    temperature: 0.7,
+    topK: 20,
+    topP: 0.8,
+  });
+  
+  // Parse output like:
+  // lex: machine learning algorithms
+  // vec: artificial intelligence models
+  // hyde: A guide explaining neural networks and deep learning
+  
+  return parseQueryables(result);
+}
+```
+
+### Strong Signal Detection
+
+QMD skips expensive query expansion when BM25 finds a strong exact match:
+
+```typescript
+const STRONG_SIGNAL_MIN_SCORE = 0.85;
+const STRONG_SIGNAL_MIN_GAP = 0.15;
+
+const initialFts = store.searchFTS(query, 20, collection);
+const topScore = initialFts[0]?.score ?? 0;
+const secondScore = initialFts[1]?.score ?? 0;
+
+const hasStrongSignal = initialFts.length > 0
+  && topScore >= STRONG_SIGNAL_MIN_SCORE
+  && (topScore - secondScore) >= STRONG_SIGNAL_MIN_GAP;
+
+const expanded = hasStrongSignal ? [] : await store.expandQuery(query);
+```
+
+This optimization saves ~500ms on exact matches while preserving quality.
+
+## Search Execution
+
+### Type-Routed Search
+
+Queries are routed to appropriate backends based on type:
+
+```typescript
+// Original query always uses vector search
+const originalVec = await store.searchVec(query, model, 20, collection);
+rankedLists.push(originalVec);
+
+// Route expanded queries by type
+for (const q of expanded) {
+  if (q.type === 'lex') {
+    // Lexical → BM25/FTS5
+    const ftsResults = store.searchFTS(q.text, 20, collection);
+    rankedLists.push(ftsResults);
+  } else if (q.type === 'vec' || q.type === 'hyde') {
+    // Semantic → vector search
+    const vecResults = await store.searchVec(q.text, model, 20, collection);
+    rankedLists.push(vecResults);
+  }
+}
+```
+
+### Batch Embedding Optimization
+
+Vector queries are batch-embedded for efficiency:
+
+```typescript
+const vecQueries = [query, ...expanded.filter(q => q.type !== 'lex')];
+
+// Single batch embed call (parallelized internally)
+const llm = getDefaultLlamaCpp();
+const textsToEmbed = vecQueries.map(q => formatQueryForEmbedding(q.text));
+const embeddings = await llm.embedBatch(textsToEmbed);
+
+// Use pre-computed embeddings for vector search
+for (let i = 0; i < vecQueries.length; i++) {
+  const vecResults = await store.searchVec(
+    vecQueries[i].text, model, 20, collection,
+    undefined, embeddings[i].embedding  // Pre-computed
+  );
+  rankedLists.push(vecResults);
+}
+```
+
+## Reciprocal Rank Fusion (RRF)
+
+### Algorithm
+
+RRF combines multiple ranked lists into a single ranking:
+
+```typescript
+export function reciprocalRankFusion(
+  resultLists: RankedResult[][],
+  weights: number[] = [],
+  k: number = 60
+): RankedResult[] {
+  const scores = new Map<string, { result: RankedResult; rrfScore: number; topRank: number }>();
+
+  for (let listIdx = 0; listIdx < resultLists.length; listIdx++) {
+    const list = resultLists[listIdx];
+    const weight = weights[listIdx] ?? 1.0;
+
+    for (let rank = 0; rank < list.length; rank++) {
+      const result = list[rank];
+      // RRF formula: weight / (k + rank + 1)
+      const rrfContribution = weight / (k + rank + 1);
+      const existing = scores.get(result.file);
+
+      if (existing) {
+        existing.rrfScore += rrfContribution;
+        existing.topRank = Math.min(existing.topRank, rank);
+      } else {
+        scores.set(result.file, {
+          result,
+          rrfScore: rrfContribution,
+          topRank: rank,
+        });
+      }
+    }
+  }
+
+  // Top-rank bonus
+  for (const entry of scores.values()) {
+    if (entry.topRank === 0) {
+      entry.rrfScore += 0.05;  // #1 rank bonus
+    } else if (entry.topRank <= 2) {
+      entry.rrfScore += 0.02;  // #2-3 rank bonus
+    }
+  }
+
+  return Array.from(scores.values())
+    .sort((a, b) => b.rrfScore - a.rrfScore)
+    .map(e => ({ ...e.result, score: e.rrfScore }));
+}
+```
+
+### Fusion Configuration
+
+```typescript
+// Original query gets 2x weight to preserve exact matches
+const weights = rankedLists.map((_, i) => i < 2 ? 2.0 : 1.0);
+
+const fused = reciprocalRankFusion(rankedLists, weights, k=60);
+
+// Take top 30 for reranking
+const candidates = fused.slice(0, 30);
+```
+
+### Why k=60?
+
+The constant `k=60` provides a good balance:
+
+- Lower `k` → top ranks dominate (more weight on position)
+- Higher `k` → flatter distribution (more weight on presence)
+- `k=60` is the empirically-validated default from RRF literature
+
+## Reranking
+
+### Chunk Selection
+
+Reranking uses document chunks (not full bodies) to avoid O(tokens) performance trap:
+
+```typescript
+const queryTerms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+const chunksToRerank: { file: string; text: string }[] = [];
+
+for (const cand of candidates) {
+  const chunks = chunkDocument(cand.body);  // ~900 tokens each
+  
+  // Pick chunk with most keyword overlap
+  let bestIdx = 0;
+  let bestScore = -1;
+  for (let i = 0; i < chunks.length; i++) {
+    const chunkLower = chunks[i].text.toLowerCase();
+    const score = queryTerms.reduce(
+      (acc, term) => acc + (chunkLower.includes(term) ? 1 : 0),
+      0
+    );
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = i;
+    }
+  }
+  
+  chunksToRerank.push({ file: cand.file, text: chunks[bestIdx].text });
+}
+```
+
+### Reranker Model
+
+QMD uses Qwen3-Reranker (cross-encoder architecture):
+
+```
+hf:ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/qwen3-reranker-0.6b-q8_0.gguf
+```
+
+```typescript
+async function rerank(
+  query: string,
+  documents: { file: string; text: string }[]
+): Promise<{ file: string; score: number }[]> {
+  const llm = getDefaultLlamaCpp();
+  const rerankResult = await llm.rerank(query, documents);
+  
+  // Returns scores in [0, 1] range
+  return rerankResult.results
+    .map(r => ({ file: r.file, score: r.score }))
+    .sort((a, b) => b.score - a.score);
+}
+```
+
+### Context Size Optimization
+
+Reranker uses optimized context window:
+
+```typescript
+private static readonly RERANK_CONTEXT_SIZE = 2048;  // vs default 40960
+private static readonly RERANK_TEMPLATE_OVERHEAD = 200;
+
+// Truncate chunks that exceed budget
+const queryTokens = model.tokenize(query).length;
+const maxDocTokens = RERANK_CONTEXT_SIZE - RERANK_TEMPLATE_OVERHEAD - queryTokens;
+
+const truncatedDocs = documents.map((doc) => {
+  const tokens = model.tokenize(doc.text);
+  if (tokens.length <= maxDocTokens) return doc;
+  const truncatedText = model.detokenize(tokens.slice(0, maxDocTokens));
+  return { ...doc, text: truncatedText };
+});
+```
+
+This reduces VRAM from 11.6 GB to 960 MB per context (12× reduction).
+
+## Position-Aware Blending
+
+### Motivation
+
+Pure reranker scores can destroy high-confidence retrieval results. Position-aware blending preserves exact matches while trusting the reranker for semantic matches.
+
+### Algorithm
+
+```typescript
+const blended = reranked.map(r => {
+  const rrfRank = rrfRankMap.get(r.file) || candidateLimit;
+  
+  // Position-aware weights
+  let rrfWeight: number;
+  if (rrfRank <= 3) {
+    rrfWeight = 0.75;      // Top results: trust retrieval
+  } else if (rrfRank <= 10) {
+    rrfWeight = 0.60;      // Middle: balanced
+  } else {
+    rrfWeight = 0.40;      // Lower: trust reranker
+  }
+  
+  const rrfScore = 1 / rrfRank;
+  const blendedScore = rrfWeight * rrfScore + (1 - rrfWeight) * r.score;
+  
+  return { ...r, score: blendedScore };
+}).sort((a, b) => b.score - a.score);
+```
+
+### Weight Breakdown
+
+| RRF Rank | RRF Weight | Reranker Weight | Rationale |
+|----------|------------|-----------------|----------|
+| 1-3 | 75% | 25% | Preserve exact matches |
+| 4-10 | 60% | 40% | Balanced trust |
+| 11+ | 40% | 60% | Trust reranker for semantic matches |
+
+### Example
+
+For a document at RRF rank 2 (high retrieval confidence):
+
+```typescript
+rrfScore = 1 / 2 = 0.50
+rerankScore = 0.30  // Reranker disagrees
+rrfWeight = 0.75    // Rank 2 → trust retrieval
+
+blendedScore = 0.75 * 0.50 + 0.25 * 0.30
+             = 0.375 + 0.075
+             = 0.45  // Preserved despite reranker disagreement
+```
+
+For a document at RRF rank 15 (lower retrieval confidence):
+
+```typescript
+rrfScore = 1 / 15 = 0.067
+rerankScore = 0.85  // Reranker strongly agrees
+rrfWeight = 0.40    // Rank 15 → trust reranker
+
+blendedScore = 0.40 * 0.067 + 0.60 * 0.85
+             = 0.027 + 0.51
+             = 0.537  // Reranker elevated this result
+```
+
+## Pipeline Summary
+
+1. **BM25 Probe** → strong signal detection (skip expansion)
+2. **Query Expansion** → typed variants (lex/vec/hyde)
+3. **Type-Routed Search** → FTS for lex, vector for vec/hyde
+4. **Batch Embedding** → parallel embedding for efficiency
+5. **RRF Fusion** → combine results with weighted ranks
+6. **Chunk Selection** → keyword-best chunk per document
+7. **Reranking** → LLM scores on chunks (not full bodies)
+8. **Position-Aware Blending** → trust retrieval for top ranks, reranker for semantic matches
+9. **Deduplication** → one result per file
+10. **Score Filtering** → apply `minScore` threshold
+11. **Top-K Selection** → slice to requested limit

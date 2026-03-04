@@ -1,0 +1,158 @@
+---
+title: qmd search
+description: BM25 full-text keyword search (no LLM)
+---
+
+Full-text search using BM25 ranking. Fast keyword-based search without LLM processing.
+
+## Usage
+
+```bash
+qmd search [options] <query>
+```
+
+<ParamField path="query" type="string" required>
+  Search terms (supports phrases, proximity, and boolean operators)
+</ParamField>
+
+## Options
+
+<ParamField path="-c, --collection" type="string">
+  Filter by collection name (can be specified multiple times). Defaults to all included collections.
+</ParamField>
+
+<ParamField path="-n" type="number" default="5 (CLI), 20 (JSON/files)">
+  Maximum number of results
+</ParamField>
+
+<ParamField path="--all" type="boolean" default="false">
+  Return all matches (use with `--min-score`)
+</ParamField>
+
+<ParamField path="--min-score" type="number" default="0">
+  Minimum score threshold (0-1)
+</ParamField>
+
+<ParamField path="--full" type="boolean" default="false">
+  Show full document instead of snippet
+</ParamField>
+
+<ParamField path="--line-numbers" type="boolean" default="false">
+  Add line numbers to output
+</ParamField>
+
+<ParamField path="--json" type="boolean" default="false">
+  Output as JSON
+</ParamField>
+
+<ParamField path="--csv" type="boolean" default="false">
+  Output as CSV
+</ParamField>
+
+<ParamField path="--md" type="boolean" default="false">
+  Output as Markdown
+</ParamField>
+
+<ParamField path="--xml" type="boolean" default="false">
+  Output as XML
+</ParamField>
+
+<ParamField path="--files" type="boolean" default="false">
+  Output file paths only (with docid and score)
+</ParamField>
+
+## Query Syntax
+
+BM25 search supports:
+
+**Exact phrases:**
+```bash
+qmd search '"CAP theorem"'
+```
+
+**Proximity search:**
+```bash
+qmd search 'distributed systems'  # Terms within 10 words
+```
+
+**Individual terms (OR):**
+```bash
+qmd search 'kubernetes docker'  # Matches either term
+```
+
+**Negation:**
+```bash
+qmd search 'database -mongodb'  # Exclude documents with "mongodb"
+```
+
+## Examples
+
+```bash
+# Basic search
+qmd search "authentication"
+
+# Search in specific collection
+qmd search "API design" -c docs
+
+# Search multiple collections
+qmd search "deployment" -c notes -c wiki
+
+# Get all results above threshold
+qmd search "error handling" --all --min-score 0.4
+
+# JSON output with full documents
+qmd search "configuration" --json --full
+
+# Export to CSV
+qmd search "meeting notes" --csv -n 50
+```
+
+## Output Formats
+
+### CLI (default)
+Color-coded results with snippets, scores, and context.
+
+### JSON
+Structured output with `docid`, `score`, `file`, `title`, `context`, and `snippet`/`body`.
+
+### Files
+Simple format: `#docid,score,filepath,"context"`
+
+### CSV
+Spreadsheet-compatible with all fields.
+
+### Markdown
+Formatted for documentation with headings and code blocks.
+
+### XML
+Structured XML with `<document>` elements.
+
+## Score Normalization
+
+BM25 scores are normalized to 0-1 range using sigmoid transformation:
+- **70%+** — Excellent match (green)
+- **40-69%** — Good match (yellow)
+- **Below 40%** — Weak match (dim)
+
+## Performance
+
+BM25 search is the fastest option:
+- No LLM inference required
+- Direct SQLite FTS5 index query
+- Typically completes in under 50ms
+
+For better semantic understanding, use [`qmd query`](/cli/query) or [`qmd vsearch`](/cli/vsearch).
+
+## Related Commands
+
+<CardGroup cols={2}>
+  <Card title="qmd query" icon="sparkles" href="/cli/query">
+    Hybrid search with query expansion and reranking (recommended)
+  </Card>
+  <Card title="qmd vsearch" icon="vector-square" href="/cli/vsearch">
+    Vector semantic search
+  </Card>
+  <Card title="qmd get" icon="file" href="/cli/get">
+    Retrieve document by path or docid
+  </Card>
+</CardGroup>
