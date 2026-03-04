@@ -118,7 +118,7 @@ Combine multiple query types for best recall:
       
       <Expandable title="Result object">
         <ResponseField name="docid" type="string">
-          Short document ID with `#` prefix (e.g., `#abc123`). Use with `qmd_get`.
+          Short document ID with `#` prefix (e.g., `#abc123`). Use with `get`.
         </ResponseField>
         
         <ResponseField name="file" type="string">
@@ -243,10 +243,10 @@ The CLI uses automatic query expansion, while the MCP tool gives you explicit co
 ## Related Tools
 
 <CardGroup cols={2}>
-  <Card title="get Tool" icon="file" href="/mcp/qmd-get">
+  <Card title="get Tool" icon="file" href="/mcp/get">
     Retrieve documents from search results
   </Card>
-  <Card title="status Tool" icon="chart-simple" href="/mcp/qmd-status">
+  <Card title="status Tool" icon="chart-simple" href="/mcp/status">
     Check if embeddings are available for vec/hyde
   </Card>
 </CardGroup>

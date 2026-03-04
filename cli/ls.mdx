@@ -1,0 +1,54 @@
+---
+title: qmd ls
+description: List collections or files within a collection
+---
+
+List all collections or browse files within a specific collection.
+
+## Usage
+
+```bash
+qmd ls [collection[/path]]
+```
+
+## Arguments
+
+<ParamField path="collection[/path]" type="string" optional>
+  Optional collection name or path within a collection. If omitted, lists all collections.
+</ParamField>
+
+## Examples
+
+### List all collections
+
+```bash
+qmd ls
+```
+
+Shows all configured collections with their paths.
+
+### List files in a collection
+
+```bash
+qmd ls notes
+```
+
+Lists all indexed files in the `notes` collection.
+
+### List files in a subdirectory
+
+```bash
+qmd ls notes/2024
+qmd ls qmd://journals/2025
+```
+
+Lists files within a specific path in the collection.
+
+<Note>
+  This is a read-only command that shows what's currently indexed. It does not scan the filesystem.
+</Note>
+
+## Related
+
+- [qmd collection list](/cli/collection#list) - List all collections with details
+- [Collections concept](/concepts/collections) - Understanding collections and paths

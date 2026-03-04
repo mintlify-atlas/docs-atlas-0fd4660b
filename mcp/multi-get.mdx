@@ -229,7 +229,7 @@ Each file is truncated to 20 lines with a suffix:
   "content": [
     {
       "type": "text",
-      "text": "[SKIPPED: data/large.json - file too large (12345 bytes > 5000 bytes). Use 'qmd_get' with file=\"data/large.json\" to retrieve.]"
+      "text": "[SKIPPED: data/large.json - file too large (12345 bytes > 5000 bytes). Use 'get' with file=\"data/large.json\" to retrieve.]"
     },
     {
       "type": "resource",
@@ -314,10 +314,10 @@ Default `maxBytes` is 10KB to prevent overwhelming the response. For large batch
 ## Related Tools
 
 <CardGroup cols={2}>
-  <Card title="get Tool" icon="file" href="/mcp/qmd-get">
+  <Card title="get Tool" icon="file" href="/mcp/get">
     Retrieve a single document (no size limits)
   </Card>
-  <Card title="query Tool" icon="magnifying-glass" href="/mcp/qmd-search">
+  <Card title="query Tool" icon="magnifying-glass" href="/mcp/query">
     Search to discover documents before retrieval
   </Card>
   <Card title="CLI: multi-get" icon="terminal" href="/cli/multi-get">

@@ -1,0 +1,72 @@
+---
+title: qmd cleanup
+description: Clean up the index and reclaim disk space
+---
+
+Remove orphaned data and vacuum the database to reclaim disk space.
+
+## Usage
+
+```bash
+qmd cleanup
+```
+
+## What Gets Cleaned
+
+<Steps>
+
+<Step title="Clear LLM cache">
+Removes cached query expansion and reranking results from previous searches.
+</Step>
+
+<Step title="Remove orphaned embeddings">
+Deletes embedding chunks for documents that no longer exist.
+</Step>
+
+<Step title="Remove inactive documents">
+Removes document records marked as inactive (deleted from filesystem but still in index).
+</Step>
+
+<Step title="Vacuum database">
+Reclaims disk space by compacting the SQLite database file.
+</Step>
+
+</Steps>
+
+## When to Use
+
+Run `qmd cleanup` when:
+
+- You've removed files from collections and want to reclaim space
+- The cache has grown large and you want to clear it
+- The database file size seems larger than expected
+- After bulk deletions or collection removals
+
+<Info>
+  Cleanup is safe to run at any time. It only removes data that is no longer needed.
+</Info>
+
+## Example Output
+
+```bash
+$ qmd cleanup
+✓ Cleared 247 cached API responses
+✓ Removed 15 orphaned embedding chunks
+✓ Removed 8 inactive document records
+✓ Database vacuumed
+```
+
+## Performance Impact
+
+- Clearing cache means next searches will be slower (query expansion/reranking not cached)
+- Embeddings will need to be regenerated if documents change
+- Vacuum can take a few seconds for large databases
+
+<Tip>
+  Run `qmd cleanup` periodically to keep the index lean, especially if you frequently add/remove documents.
+</Tip>
+
+## Related
+
+- [qmd update](/cli/update) - Re-index all collections
+- [qmd status](/cli/status) - Check index health before cleanup

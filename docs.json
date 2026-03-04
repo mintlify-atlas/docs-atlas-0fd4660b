@@ -82,9 +82,11 @@
               "cli/query",
               "cli/get",
               "cli/multi-get",
+              "cli/ls",
               "cli/embed",
               "cli/update",
               "cli/status",
+              "cli/cleanup",
               "cli/mcp"
             ]
           },
@@ -104,12 +106,10 @@
             "group": "Tools",
             "pages": [
               "mcp/overview",
-              "mcp/qmd-search",
-              "mcp/qmd-vector-search",
-              "mcp/qmd-deep-search",
-              "mcp/qmd-get",
-              "mcp/qmd-multi-get",
-              "mcp/qmd-status"
+              "mcp/query",
+              "mcp/get",
+              "mcp/multi-get",
+              "mcp/status"
             ]
           },
           {
